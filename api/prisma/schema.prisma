@@ -261,12 +261,13 @@ model ListaEspera {
 }
 
 model SessaoBot {
-  id               String   @id @default(cuid())
-  tenant_id        String
-  cliente_telefone String
-  etapa_atual      String   @default("INICIO")
-  dados_coletados  Json     @default("{}")
-  updated_at       DateTime @updatedAt
+  id                  String    @id @default(cuid())
+  tenant_id           String
+  cliente_telefone    String
+  etapa_atual         String    @default("INICIO")
+  dados_coletados     Json      @default("{}")
+  ultima_mensagem_em  DateTime?
+  updated_at          DateTime  @updatedAt
 
   tenant Tenant @relation(fields: [tenant_id], references: [id])
 

@@ -4,7 +4,8 @@ export type Etapa =
   | "PROFISSIONAL"
   | "DATA"
   | "HORARIO"
-  | "CONFIRMAR"
+  | "CONFIRMACAO"   // resumo + botões Confirmar/Cancelar
+  | "CONFIRMAR"     // coleta o nome para finalizar o agendamento
   | "FILA_ESPERA"
   | "FILA_NOME"
   | "CONCLUIDO";
@@ -25,10 +26,14 @@ export interface ContextoSessao {
   etapa: Etapa;
   dados: DadosColetados;
   mensagemEntrada: string;
+  // Preenchido quando o input veio de um clique em botão/lista interativa
+  payloadType?: string;
+  payloadValue?: string;
 }
 
 export interface ResultadoEstado {
   resposta: string;
+  opcoes?: import("../whatsapp/interactiveMessenger").InteractiveOption[];
   proximaEtapa: Etapa;
   dadosAtualizados: DadosColetados;
   concluido?: boolean;
