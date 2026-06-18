@@ -121,6 +121,16 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    to: "/configuracoes/mensagens",
+    label: "Mensagens Bot",
+    roles: ["dono"],
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h6m-6 8l4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+      </svg>
+    ),
+  },
+  {
     to: "/configuracoes/equipe",
     label: "Equipe",
     roles: ["dono", "gerente"],

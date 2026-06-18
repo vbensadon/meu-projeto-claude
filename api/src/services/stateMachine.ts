@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import type { ContextoSessao, DadosColetados, Etapa, ResultadoEstado } from "../lib/types";
 import type { InteractiveOption } from "../whatsapp/interactiveMessenger";
+import type { EtapaConversa } from "@prisma/client";
 import { criarAgendamento } from "./agendamentoService";
 import { buscarHorariosDisponiveis } from "./calendarService";
 import { adicionarNaFila } from "./listaEsperaService";
@@ -11,6 +12,35 @@ import {
   MSG_FILA_ESPERA_PEDIR_NOME,
   MSG_FILA_ESPERA_CONFIRMACAO,
 } from "../constants/messages";
+
+// ── config customizada por tenant ─────────────────────────────────────────
+
+async function getTexto(
+  tenantId: string,
+  etapa: EtapaConversa,
+  padrao: string,
+  vars: Record<string, string> = {}
+): Promise<string> {
+  const config = await prisma.interactiveMessageConfig.findUnique({
+    where: { tenant_id_etapa: { tenant_id: tenantId, etapa } },
+    select: { corpo_texto: true, ativo: true },
+  });
+  const template = config?.ativo ? (config.corpo_texto || padrao) : padrao;
+  return Object.entries(vars).reduce((t, [k, v]) => t.split(`{${k}}`).join(v), template);
+}
+
+async function getLabels(
+  tenantId: string,
+  etapa: EtapaConversa,
+  padrao: string[]
+): Promise<string[]> {
+  const config = await prisma.interactiveMessageConfig.findUnique({
+    where: { tenant_id_etapa: { tenant_id: tenantId, etapa } },
+    select: { labels_botoes: true },
+  });
+  const arr = config?.labels_botoes as string[] | null;
+  return arr && arr.length > 0 ? arr : padrao;
+}
 
 // ── utilitários de data ────────────────────────────────────────────────────
 
@@ -59,12 +89,8 @@ async function handleInicio(ctx: ContextoSessao): Promise<ResultadoEstado> {
     description: `${s.duracao_minutos}min — R$${Number(s.preco).toFixed(2)}`,
   }));
 
-  return {
-    resposta: "Olá! Bem-vindo ao agendamento 😊\n\nEscolha o serviço:",
-    opcoes,
-    proximaEtapa: "SERVICO",
-    dadosAtualizados: {},
-  };
+  const texto = await getTexto(ctx.tenantId, "BOAS_VINDAS", "Olá! Bem-vindo ao agendamento 😊\n\nEscolha o serviço:");
+  return { resposta: texto, opcoes, proximaEtapa: "SERVICO", dadosAtualizados: {} };
 }
 
 async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
@@ -114,12 +140,8 @@ async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
     payload: `barber:${p.id}`,
   }));
 
-  return {
-    resposta: `Ótimo! Você escolheu *${servico.nome}*.\n\nAgora, escolha o profissional:`,
-    opcoes,
-    proximaEtapa: "PROFISSIONAL",
-    dadosAtualizados: { ...ctx.dados, servico_id: servico.id, servico_nome: servico.nome },
-  };
+  const texto = await getTexto(ctx.tenantId, "ESCOLHA_PROFISSIONAL", `Ótimo! Você escolheu *${servico.nome}*.\n\nAgora, escolha o profissional:`, { serviceName: servico.nome });
+  return { resposta: texto, opcoes, proximaEtapa: "PROFISSIONAL", dadosAtualizados: { ...ctx.dados, servico_id: servico.id, servico_nome: servico.nome } };
 }
 
 async function handleProfissional(ctx: ContextoSessao): Promise<ResultadoEstado> {
@@ -150,9 +172,15 @@ async function handleProfissional(ctx: ContextoSessao): Promise<ResultadoEstado>
     };
   }
 
+  const [labelHoje, labelAmanha, labelOutra] = await getLabels(ctx.tenantId, "ESCOLHA_DATA", ["Hoje", "Amanhã", "Outra data"]);
+  const texto = await getTexto(ctx.tenantId, "ESCOLHA_DATA", `Perfeito! *${prof.nome}* selecionado.\n\nQual data você prefere?`, { barberName: prof.nome });
   return {
-    resposta: `Perfeito! *${prof.nome}* selecionado.\n\nQual data você prefere?`,
-    opcoes: opcoesData(),
+    resposta: texto,
+    opcoes: [
+      { label: labelHoje, payload: `date:${isoHoje()}` },
+      { label: labelAmanha, payload: `date:${isoAmanha()}` },
+      { label: labelOutra, payload: "date:custom" },
+    ],
     proximaEtapa: "DATA",
     dadosAtualizados: { ...ctx.dados, profissional_id: prof.id, profissional_nome: prof.nome },
   };
@@ -205,16 +233,23 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
   const dataFormatada = formatarData(dataISO);
 
   if (horarios.length === 0) {
+    const [labelSim, labelNao] = await getLabels(ctx.tenantId, "FILA_ESPERA_PROMPT", ["Sim, entrar na fila", "Não, obrigado"]);
+    const textoFila = await getTexto(ctx.tenantId, "FILA_ESPERA_PROMPT",
+      MSG_FILA_ESPERA_OFERTA(dataFormatada, ctx.dados.profissional_nome ?? ""),
+      { date: dataFormatada, barberName: ctx.dados.profissional_nome ?? "" }
+    );
     return {
-      resposta: MSG_FILA_ESPERA_OFERTA(dataFormatada, ctx.dados.profissional_nome ?? ""),
+      resposta: textoFila,
       opcoes: [
-        { label: "Sim, entrar na fila", payload: "waitlist:yes" },
-        { label: "Não, obrigado", payload: "waitlist:no" },
+        { label: labelSim, payload: "waitlist:yes" },
+        { label: labelNao, payload: "waitlist:no" },
       ],
       proximaEtapa: "FILA_ESPERA",
       dadosAtualizados: { ...ctx.dados, data: dataISO },
     };
   }
+
+  const textoHorario = await getTexto(ctx.tenantId, "ESCOLHA_HORARIO", `Horários disponíveis em *${dataFormatada}*:`, { date: dataFormatada });
 
   const opcoes: InteractiveOption[] = horarios.map((h) => ({
     label: h,
@@ -222,7 +257,7 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
   }));
 
   return {
-    resposta: `Horários disponíveis em *${dataFormatada}*:`,
+    resposta: textoHorario,
     opcoes,
     proximaEtapa: "HORARIO",
     dadosAtualizados: { ...ctx.dados, data: dataISO },
@@ -256,17 +291,25 @@ async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
   }
 
   const dataFormatada = formatarData(ctx.dados.data!);
+  const [labelConfirmar, labelCancelar] = await getLabels(ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", ["✅ Confirmar", "❌ Cancelar"]);
+  const textoPadrao =
+    `Confirme seu agendamento:\n\n` +
+    `📋 *Serviço:* ${ctx.dados.servico_nome}\n` +
+    `👤 *Profissional:* ${ctx.dados.profissional_nome}\n` +
+    `📅 *Data:* ${dataFormatada}\n` +
+    `🕐 *Horário:* ${horario}`;
+  const textoConfirm = await getTexto(ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", textoPadrao, {
+    serviceName: ctx.dados.servico_nome ?? "",
+    barberName:  ctx.dados.profissional_nome ?? "",
+    date:        dataFormatada,
+    time:        horario,
+  });
 
   return {
-    resposta:
-      `Confirme seu agendamento:\n\n` +
-      `📋 *Serviço:* ${ctx.dados.servico_nome}\n` +
-      `👤 *Profissional:* ${ctx.dados.profissional_nome}\n` +
-      `📅 *Data:* ${dataFormatada}\n` +
-      `🕐 *Horário:* ${horario}`,
+    resposta: textoConfirm,
     opcoes: [
-      { label: "✅ Confirmar", payload: "confirm:yes" },
-      { label: "❌ Cancelar", payload: "confirm:no" },
+      { label: labelConfirmar, payload: "confirm:yes" },
+      { label: labelCancelar,  payload: "confirm:no" },
     ],
     proximaEtapa: "CONFIRMACAO",
     dadosAtualizados: { ...ctx.dados, horario },

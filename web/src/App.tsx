@@ -19,6 +19,7 @@ import Campanhas from "./pages/Campanhas";
 import Comissoes from "./pages/Comissoes";
 import Equipe from "./pages/Equipe";
 import ConfigBot from "./pages/ConfigBot";
+import MensagensInterativas from "./pages/MensagensInterativas";
 import Configuracoes from "./pages/Configuracoes";
 
 export default function App() {
@@ -67,6 +68,11 @@ export default function App() {
           <Route path="configuracoes/equipe" element={
             <RequireRole roles={["dono", "gerente"]}>
               <Equipe />
+            </RequireRole>
+          } />
+          <Route path="configuracoes/mensagens" element={
+            <RequireRole roles={["dono"]}>
+              <MensagensInterativas />
             </RequireRole>
           } />
           <Route path="configuracoes/bot" element={

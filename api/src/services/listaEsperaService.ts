@@ -1,6 +1,8 @@
 import { prisma } from "../lib/prisma";
 import { buscarHorariosDisponiveis } from "./calendarService";
 import { enviarMensagem } from "./twilioService";
+import { sendInteractiveMessage } from "../whatsapp/interactiveMessenger";
+import { isWithinSession } from "../whatsapp/sessionWindow";
 import { MSG_FILA_ESPERA_VAGA_DISPONIVEL } from "../constants/messages";
 
 const DIAS_PARA_EXPIRAR = 1;
@@ -88,20 +90,50 @@ export async function processarFilaEspera(): Promise<void> {
     if (!profissionalDisponivel) continue;
 
     try {
-      await enviarMensagem(
-        {
-          accountSid: entrada.tenant.twilio_account_sid,
-          authToken: entrada.tenant.twilio_auth_token,
-          numeroOrigem: entrada.tenant.telefone_whatsapp,
-        },
-        `whatsapp:${entrada.cliente_telefone}`,
-        MSG_FILA_ESPERA_VAGA_DISPONIVEL(
-          entrada.cliente_nome,
-          entrada.data_desejada.toLocaleDateString("pt-BR"),
-          profissionalDisponivel.nome,
-          entrada.servico.nome
-        )
+      const corpo = MSG_FILA_ESPERA_VAGA_DISPONIVEL(
+        entrada.cliente_nome,
+        entrada.data_desejada.toLocaleDateString("pt-BR"),
+        profissionalDisponivel.nome,
+        entrada.servico.nome
       );
+      const destinatario = `whatsapp:${entrada.cliente_telefone}`;
+      const emSessao = await isWithinSession(entrada.tenant_id, entrada.cliente_telefone);
+
+      if (!emSessao) {
+        const tmpl = await prisma.whatsAppTemplate.findUnique({
+          where: { tenant_id_chave: { tenant_id: entrada.tenant_id, chave: "vaga_fila_espera" } },
+        });
+
+        if (tmpl?.status === "aprovado") {
+          await sendInteractiveMessage({
+            tenantId: entrada.tenant_id,
+            to: destinatario,
+            bodyText: corpo,
+            options: [],
+            inSession: false,
+            contentSid: tmpl.content_sid,
+            contentVariables: {
+              "1": entrada.cliente_nome,
+              "2": entrada.data_desejada.toLocaleDateString("pt-BR"),
+              "3": profissionalDisponivel.nome,
+              "4": entrada.servico.nome,
+            },
+          });
+        } else {
+          console.warn(`[ListaEspera] Sem template aprovado para tenant ${entrada.tenant_id} — enviando texto simples fora de sessão`);
+          await enviarMensagem(
+            { accountSid: entrada.tenant.twilio_account_sid, authToken: entrada.tenant.twilio_auth_token, numeroOrigem: entrada.tenant.telefone_whatsapp },
+            destinatario,
+            corpo
+          );
+        }
+      } else {
+        await enviarMensagem(
+          { accountSid: entrada.tenant.twilio_account_sid, authToken: entrada.tenant.twilio_auth_token, numeroOrigem: entrada.tenant.telefone_whatsapp },
+          destinatario,
+          corpo
+        );
+      }
 
       await prisma.listaEspera.update({
         where: { id: entrada.id },

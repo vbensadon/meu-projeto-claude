@@ -38,9 +38,11 @@ model Tenant {
   avaliacoes           Avaliacao[]
   regras_comissao      RegraComissao[]
   lancamentos_comissao LancamentoComissao[]
-  usuarios             Usuario[]
-  config_bot           ConfigBot?
-  horarios_bot         HorarioBot[]
+  usuarios                 Usuario[]
+  config_bot               ConfigBot?
+  horarios_bot             HorarioBot[]
+  whatsapp_templates       WhatsAppTemplate[]
+  interactive_msg_configs  InteractiveMessageConfig[]
 
   @@map("tenants")
 }
@@ -390,4 +392,64 @@ model LogCampanha {
   campanha Campanha? @relation(fields: [campanha_id], references: [id])
 
   @@map("log_campanhas")
+}
+
+// ── Parte 5: Templates WhatsApp aprovados pela Meta (para mensagens fora de sessão) ──
+
+model WhatsAppTemplate {
+  id          String         @id @default(cuid())
+  tenant_id   String
+  chave       String         // ex: "lembrete_24h", "vaga_fila_espera"
+  content_sid String         // HX... gerado pela Twilio
+  status      StatusTemplate @default(pendente)
+  variaveis   Json           @default("{}")
+  created_at  DateTime       @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, chave])
+  @@map("whatsapp_templates")
+}
+
+enum StatusTemplate {
+  pendente
+  aprovado
+  rejeitado
+}
+
+// ── Parte 6: Configuração das mensagens interativas por etapa ─────────────
+
+model InteractiveMessageConfig {
+  id            String          @id @default(cuid())
+  tenant_id     String
+  etapa         EtapaConversa
+  corpo_texto   String
+  formato       FormatoMensagem @default(AUTOMATICO)
+  labels_botoes Json            @default("[]")
+  ativo         Boolean         @default(true)
+  updated_at    DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, etapa])
+  @@map("interactive_message_configs")
+}
+
+enum EtapaConversa {
+  BOAS_VINDAS
+  ESCOLHA_SERVICO
+  ESCOLHA_PROFISSIONAL
+  ESCOLHA_DATA
+  ESCOLHA_HORARIO
+  FILA_ESPERA_PROMPT
+  CONFIRMACAO_AGENDAMENTO
+  LEMBRETE
+  VAGA_FILA_ESPERA
+}
+
+enum FormatoMensagem {
+  AUTOMATICO    // sistema decide (≤3 → quick reply, >3 → lista)
+  QUICK_REPLY
+  LISTA
+  TEXTO
 }

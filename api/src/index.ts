@@ -21,6 +21,8 @@ import avaliacoesRouter from "./routes/avaliacoes";
 import usuariosRouter from "./routes/usuarios";
 import configBotRouter from "./routes/configBot";
 import relatoriosRouter from "./routes/relatorios";
+import interactiveMsgsRouter from "./routes/interactiveMsgs";
+import whatsappTemplatesRouter from "./routes/whatsappTemplates";
 import { errorHandler } from "./middlewares/errorHandler";
 import { iniciarJobs } from "./jobs";
 
@@ -57,6 +59,8 @@ app.use("/api/avaliacoes", avaliacoesRouter);
 app.use("/api/usuarios", usuariosRouter);
 app.use("/api/config-bot", configBotRouter);
 app.use("/api/relatorios", relatoriosRouter);
+app.use("/api/interactive-messages", interactiveMsgsRouter);
+app.use("/api/whatsapp-templates", whatsappTemplatesRouter);
 
 app.use(errorHandler);
 
