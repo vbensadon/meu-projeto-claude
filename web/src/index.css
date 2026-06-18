@@ -8,16 +8,16 @@
 
 :root {
   /* Light theme */
-  --ab-bg:           255 255 255;   /* #FFFFFF — fundo branco */
-  --ab-card:         248 249 253;   /* #F8F9FD — cards ligeiramente off-white */
-  --ab-border:       229 231 242;   /* #E5E7F2 — borda sutil */
-  --ab-hover:        241 242 250;   /* #F1F2FA — hover suave */
+  --ab-bg:           243 244 250;   /* #F3F4FA — fundo levemente acinzentado */
+  --ab-card:         255 255 255;   /* #FFFFFF — cards brancos que saltam do fundo */
+  --ab-border:       229 231 244;   /* #E5E7F4 — borda suave */
+  --ab-hover:        240 241 250;   /* #F0F1FA — hover sutil */
   --ab-accent:       108 99 255;    /* #6C63FF */
-  --ab-accent-hover: 91 82 224;     /* #5B52E0 */
-  --ab-teal:         0 184 148;     /* #00B894 */
-  --ab-danger:       224 62 62;     /* #E03E3E */
-  --ab-text:         17 20 35;      /* #111223 — texto quase preto */
-  --ab-muted:        100 104 128;   /* #646480 — muted com contraste AA */
+  --ab-accent-hover: 88 78 220;     /* #584EDC */
+  --ab-teal:         0 170 138;     /* #00AA8A */
+  --ab-danger:       214 48 48;     /* #D63030 */
+  --ab-text:         14 16 30;      /* #0E101E — quase preto */
+  --ab-muted:        96 100 124;    /* #60647C — cinza-roxo, WCAG AA */
 }
 
 .dark {
