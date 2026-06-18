@@ -1,0 +1,21 @@
+{
+  "name": "agendabot",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "api:install": "cd api && npm install",
+    "web:install": "cd web && npm install",
+    "install:all": "npm run api:install && npm run web:install",
+    "api:dev": "cd api && npm run dev",
+    "web:dev": "cd web && npm run dev",
+    "db:up": "docker compose up postgres -d",
+    "db:migrate": "cd api && npx prisma migrate dev --name init",
+    "db:seed": "cd api && npx ts-node prisma/seed.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "prod:build": "docker compose -f docker-compose.prod.yml build",
+    "prod:up": "docker compose -f docker-compose.prod.yml up -d",
+    "prod:down": "docker compose -f docker-compose.prod.yml down",
+    "prod:logs": "docker compose -f docker-compose.prod.yml logs -f"
+  }
+}

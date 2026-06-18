@@ -1,0 +1,455 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                      String         @id @default(cuid())
+  nome                    String
+  slug                    String         @unique
+  telefone_whatsapp       String
+  twilio_account_sid      String
+  twilio_auth_token       String
+  google_calendar_id_dono String?
+  google_access_token     String?
+  google_refresh_token    String?
+  google_token_expiry     DateTime?
+  plano                   Plano          @default(starter)
+  ativo                   Boolean        @default(true)
+  senha_hash              String
+  lembretes_ativos        Boolean        @default(true)
+  mensagem_lembrete       String?        // null = usa o template padrão
+  created_at              DateTime       @default(now())
+
+  profissionais        Profissional[]
+  servicos             Servico[]
+  agendamentos         Agendamento[]
+  sessoes_bot          SessaoBot[]
+  comissoes_pagamentos ComissaoPagamento[]
+  bloqueios            Bloqueio[]
+  lista_espera         ListaEspera[]
+  clientes             Cliente[]
+  logs_campanhas       LogCampanha[]
+  campanhas            Campanha[]
+  avaliacoes           Avaliacao[]
+  regras_comissao      RegraComissao[]
+  lancamentos_comissao LancamentoComissao[]
+  usuarios                 Usuario[]
+  config_bot               ConfigBot?
+  horarios_bot             HorarioBot[]
+  whatsapp_templates       WhatsAppTemplate[]
+  interactive_msg_configs  InteractiveMessageConfig[]
+
+  @@map("tenants")
+}
+
+model ConfigBot {
+  id         String @id @default(cuid())
+  tenant_id  String @unique
+
+  msg_boas_vindas   String @default("Olá! Bem-vindo à nossa barbearia 💈 Como posso ajudar você?\n\n1️⃣ Agendar\n2️⃣ Ver meu agendamento\n3️⃣ Cancelar agendamento")
+  msg_confirmacao   String @default("✅ Agendamento confirmado!\n\nOlá, {clientName}!\nSeu horário está marcado:\n📅 {date} às {time}\n✂️ {serviceName} com {barberName}\n\nTe esperamos!")
+  msg_cancelamento  String @default("❌ Agendamento cancelado.\n\nOlá, {clientName}! Seu agendamento de {serviceName} no dia {date} às {time} foi cancelado.\n\nFique à vontade para reagendar quando quiser!")
+  msg_fora_horario  String @default("Olá! 😊 Nosso atendimento é de segunda a sábado, das 8h às 18h.\n\nDeixe sua mensagem e retornaremos em breve!")
+  msg_reagendamento String @default("Gostaria de reagendar? Basta me dizer o novo horário de sua preferência! 😊")
+  msg_lista_espera  String @default("Não há horários disponíveis para o período solicitado. Deseja entrar na lista de espera? Vou te avisar quando surgir uma vaga! ✉️")
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@map("config_bot")
+}
+
+model HorarioBot {
+  id           String  @id @default(cuid())
+  tenant_id    String
+  dia_semana   Int     // 0=domingo, 1=segunda ... 6=sábado
+  ativo        Boolean @default(true)
+  hora_inicio  String  @default("08:00")
+  hora_fim     String  @default("18:00")
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, dia_semana])
+  @@map("horarios_bot")
+}
+
+model Profissional {
+  id                  String        @id @default(cuid())
+  tenant_id           String
+  nome                String
+  telefone_whatsapp   String?
+  google_calendar_id  String?
+  ativo               Boolean       @default(true)
+  comissao_percentual Decimal       @default(50) @db.Decimal(5, 2)
+
+  tenant              Tenant               @relation(fields: [tenant_id], references: [id])
+  agendamentos        Agendamento[]
+  comissoes_pagamentos ComissaoPagamento[]
+  bloqueios            Bloqueio[]
+  lista_espera         ListaEspera[]
+  avaliacoes           Avaliacao[]
+  regras_comissao      RegraComissao[]
+  lancamentos_comissao LancamentoComissao[]
+  usuarios             Usuario[]
+
+  @@map("profissionais")
+}
+
+model Servico {
+  id               String        @id @default(cuid())
+  tenant_id        String
+  nome             String
+  duracao_minutos  Int
+  preco            Decimal       @db.Decimal(10, 2)
+  ordem            Int           @default(0)
+
+  tenant       Tenant        @relation(fields: [tenant_id], references: [id])
+  agendamentos Agendamento[]
+  lista_espera ListaEspera[]
+  regras_comissao RegraComissao[]
+
+  @@map("servicos")
+}
+
+model Agendamento {
+  id                String            @id @default(cuid())
+  tenant_id         String
+  profissional_id   String
+  servico_id        String
+  cliente_nome      String
+  cliente_telefone  String
+  data_hora         DateTime
+  status            StatusAgendamento @default(pendente)
+  preco             Decimal?          @db.Decimal(10, 2)
+  google_event_id   String?
+  lembrete_enviado_em DateTime?
+  lembrete_status     StatusLembrete?
+  created_at        DateTime          @default(now())
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [id])
+  profissional Profissional @relation(fields: [profissional_id], references: [id])
+  servico      Servico      @relation(fields: [servico_id], references: [id])
+  avaliacao    Avaliacao?
+  lancamento_comissao LancamentoComissao?
+
+  @@map("agendamentos")
+}
+
+model ComissaoPagamento {
+  id              String   @id @default(cuid())
+  tenant_id       String
+  profissional_id String
+  periodo_inicio  DateTime
+  periodo_fim     DateTime
+  receita_base    Decimal  @db.Decimal(10, 2)
+  percentual      Decimal  @db.Decimal(5, 2)
+  valor_pago      Decimal  @db.Decimal(10, 2)
+  pago_em         DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [id])
+  profissional Profissional @relation(fields: [profissional_id], references: [id])
+
+  @@unique([profissional_id, periodo_inicio, periodo_fim])
+  @@map("comissoes_pagamentos")
+}
+
+model Usuario {
+  id              String      @id @default(cuid())
+  tenant_id       String
+  profissional_id String?
+  nome            String
+  email           String
+  senha_hash      String
+  role            RoleUsuario @default(barbeiro)
+  ativo           Boolean     @default(true)
+  invite_token    String?
+  created_at      DateTime    @default(now())
+
+  tenant       Tenant        @relation(fields: [tenant_id], references: [id])
+  profissional Profissional? @relation(fields: [profissional_id], references: [id])
+
+  @@unique([tenant_id, email])
+  @@map("usuarios")
+}
+
+enum RoleUsuario {
+  dono
+  gerente
+  recepcionista
+  barbeiro
+}
+
+model RegraComissao {
+  id              String       @id @default(cuid())
+  tenant_id       String
+  profissional_id String
+  servico_id      String?
+  tipo            TipoComissao
+  valor           Decimal      @db.Decimal(10, 2)
+  created_at      DateTime     @default(now())
+
+  tenant       Tenant        @relation(fields: [tenant_id], references: [id])
+  profissional Profissional  @relation(fields: [profissional_id], references: [id])
+  servico      Servico?      @relation(fields: [servico_id], references: [id])
+  lancamentos  LancamentoComissao[]
+
+  @@map("regras_comissao")
+}
+
+enum TipoComissao {
+  percentual
+  fixo
+}
+
+model LancamentoComissao {
+  id                  String    @id @default(cuid())
+  tenant_id           String
+  profissional_id     String
+  agendamento_id      String    @unique
+  regra_id            String?
+  valor_bruto         Decimal   @db.Decimal(10, 2)
+  comissao_percentual Decimal   @db.Decimal(5, 2)
+  comissao_valor      Decimal   @db.Decimal(10, 2)
+  pago_em             DateTime?
+  created_at          DateTime  @default(now())
+
+  tenant       Tenant        @relation(fields: [tenant_id], references: [id])
+  profissional Profissional  @relation(fields: [profissional_id], references: [id])
+  agendamento  Agendamento   @relation(fields: [agendamento_id], references: [id])
+  regra        RegraComissao? @relation(fields: [regra_id], references: [id])
+
+  @@map("lancamentos_comissao")
+}
+
+model Bloqueio {
+  id              String    @id @default(cuid())
+  tenant_id       String
+  profissional_id String
+  titulo          String
+  inicio          DateTime
+  fim             DateTime
+  recorrencia     String?   // null = único | diario | semanal
+  serie_id        String?
+  created_at      DateTime  @default(now())
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [id])
+  profissional Profissional @relation(fields: [profissional_id], references: [id])
+
+  @@map("bloqueios")
+}
+
+model ListaEspera {
+  id               String            @id @default(cuid())
+  tenant_id        String
+  profissional_id  String?           // null = qualquer profissional disponível
+  servico_id       String
+  cliente_nome     String
+  cliente_telefone String
+  data_desejada    DateTime
+  status           StatusListaEspera @default(aguardando)
+  notificado_em    DateTime?
+  expira_em        DateTime
+  created_at       DateTime          @default(now())
+
+  tenant       Tenant        @relation(fields: [tenant_id], references: [id])
+  profissional Profissional? @relation(fields: [profissional_id], references: [id])
+  servico      Servico       @relation(fields: [servico_id], references: [id])
+
+  @@map("lista_espera")
+}
+
+model SessaoBot {
+  id                  String    @id @default(cuid())
+  tenant_id           String
+  cliente_telefone    String
+  etapa_atual         String    @default("INICIO")
+  dados_coletados     Json      @default("{}")
+  ultima_mensagem_em  DateTime?
+  updated_at          DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, cliente_telefone])
+  @@map("sessoes_bot")
+}
+
+enum Plano {
+  starter
+  pro
+  premium
+}
+
+enum StatusAgendamento {
+  pendente
+  confirmado
+  cancelado
+  concluido
+  nao_compareceu
+}
+
+enum StatusListaEspera {
+  aguardando
+  notificado
+  convertido
+  expirado
+}
+
+enum StatusLembrete {
+  entregue
+  falhou
+}
+
+model Cliente {
+  id           String       @id @default(cuid())
+  tenant_id    String
+  nome         String
+  telefone     String
+  notas        String?
+  preferencias String?      // JSON string com preferências
+  aniversario  DateTime?
+  fonte        FonteCliente @default(whatsapp)
+  created_at   DateTime     @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, telefone])
+  @@map("clientes")
+}
+
+enum FonteCliente {
+  whatsapp
+  manual
+  presencial
+}
+
+model Avaliacao {
+  id              String   @id @default(cuid())
+  tenant_id       String
+  agendamento_id  String   @unique
+  profissional_id String
+  cliente_id      String?
+  nota            Int      // 1 a 5
+  comentario      String?
+  created_at      DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenant_id], references: [id])
+  agendamento  Agendamento  @relation(fields: [agendamento_id], references: [id])
+  profissional Profissional @relation(fields: [profissional_id], references: [id])
+
+  @@map("avaliacoes")
+}
+
+model Campanha {
+  id             String           @id @default(cuid())
+  tenant_id      String
+  nome           String
+  segmento       SegmentoCampanha
+  mensagem       String
+  agendado_para  DateTime?
+  enviado_em     DateTime?
+  status         StatusCampanha   @default(rascunho)
+  total_enviados Int              @default(0)
+  total_falhas   Int              @default(0)
+  created_at     DateTime         @default(now())
+
+  tenant Tenant        @relation(fields: [tenant_id], references: [id])
+  logs   LogCampanha[]
+
+  @@map("campanhas")
+}
+
+enum SegmentoCampanha {
+  todos
+  inativos_30
+  inativos_60
+  aniversariantes_mes
+  vip
+}
+
+enum StatusCampanha {
+  rascunho
+  agendada
+  enviando
+  concluida
+  falhou
+}
+
+model LogCampanha {
+  id          String    @id @default(cuid())
+  tenant_id   String
+  cliente_id  String
+  campanha_id String?
+  mensagem    String
+  enviado_em  DateTime  @default(now())
+  status      String    // enviado | falhou
+  erro        String?
+
+  tenant   Tenant    @relation(fields: [tenant_id], references: [id])
+  campanha Campanha? @relation(fields: [campanha_id], references: [id])
+
+  @@map("log_campanhas")
+}
+
+// ── Parte 5: Templates WhatsApp aprovados pela Meta (para mensagens fora de sessão) ──
+
+model WhatsAppTemplate {
+  id          String         @id @default(cuid())
+  tenant_id   String
+  chave       String         // ex: "lembrete_24h", "vaga_fila_espera"
+  content_sid String         // HX... gerado pela Twilio
+  status      StatusTemplate @default(pendente)
+  variaveis   Json           @default("{}")
+  created_at  DateTime       @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, chave])
+  @@map("whatsapp_templates")
+}
+
+enum StatusTemplate {
+  pendente
+  aprovado
+  rejeitado
+}
+
+// ── Parte 6: Configuração das mensagens interativas por etapa ─────────────
+
+model InteractiveMessageConfig {
+  id            String          @id @default(cuid())
+  tenant_id     String
+  etapa         EtapaConversa
+  corpo_texto   String
+  formato       FormatoMensagem @default(AUTOMATICO)
+  labels_botoes Json            @default("[]")
+  ativo         Boolean         @default(true)
+  updated_at    DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, etapa])
+  @@map("interactive_message_configs")
+}
+
+enum EtapaConversa {
+  BOAS_VINDAS
+  ESCOLHA_SERVICO
+  ESCOLHA_PROFISSIONAL
+  ESCOLHA_DATA
+  ESCOLHA_HORARIO
+  FILA_ESPERA_PROMPT
+  CONFIRMACAO_AGENDAMENTO
+  LEMBRETE
+  VAGA_FILA_ESPERA
+}
+
+enum FormatoMensagem {
+  AUTOMATICO    // sistema decide (≤3 → quick reply, >3 → lista)
+  QUICK_REPLY
+  LISTA
+  TEXTO
+}
