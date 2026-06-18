@@ -2,19 +2,20 @@ import type { Config } from "tailwindcss";
 
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        "ab-bg": "#0F1117",
-        "ab-card": "#1A1D27",
-        "ab-border": "#2A2D3E",
-        "ab-hover": "#1E2130",
-        "ab-accent": "#6C63FF",
-        "ab-accent-hover": "#8B5CF6",
-        "ab-teal": "#00D4AA",
-        "ab-danger": "#FF5C5C",
-        "ab-text": "#E8E9F0",
-        "ab-muted": "#8B8FA8",
+        "ab-bg":           "rgb(var(--ab-bg) / <alpha-value>)",
+        "ab-card":         "rgb(var(--ab-card) / <alpha-value>)",
+        "ab-border":       "rgb(var(--ab-border) / <alpha-value>)",
+        "ab-hover":        "rgb(var(--ab-hover) / <alpha-value>)",
+        "ab-accent":       "rgb(var(--ab-accent) / <alpha-value>)",
+        "ab-accent-hover": "rgb(var(--ab-accent-hover) / <alpha-value>)",
+        "ab-teal":         "rgb(var(--ab-teal) / <alpha-value>)",
+        "ab-danger":       "rgb(var(--ab-danger) / <alpha-value>)",
+        "ab-text":         "rgb(var(--ab-text) / <alpha-value>)",
+        "ab-muted":        "rgb(var(--ab-muted) / <alpha-value>)",
       },
       borderRadius: {
         card: "12px",

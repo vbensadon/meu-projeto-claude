@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import axios from "axios";
 import { api } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
+import { useTheme } from "../contexts/ThemeContext";
 import BotaoExportar from "../components/BotaoExportar";
 import type { Agendamento, Bloqueio, Profissional, Servico } from "../lib/types";
 
@@ -10,13 +11,20 @@ const HORAS = Array.from({ length: 24 }, (_, i) => i); // 00 - 23
 const HORA_SCROLL_INICIAL = 7; // ao abrir, posiciona perto do horário comercial
 const ALTURA_HORA = 64;
 const SNAP_MINUTOS = 15;
-const CORES = [
+const CORES_DARK = [
   "bg-ab-accent/20 border-ab-accent text-ab-accent",
   "bg-emerald-500/20 border-emerald-400 text-emerald-300",
   "bg-amber-500/20 border-amber-400 text-amber-300",
   "bg-rose-500/20 border-rose-400 text-rose-300",
   "bg-purple-500/20 border-purple-400 text-purple-300",
-];
+] as const;
+const CORES_LIGHT = [
+  "bg-ab-accent/15 border-ab-accent text-ab-accent",
+  "bg-emerald-500/15 border-emerald-600 text-emerald-700",
+  "bg-amber-500/15 border-amber-600 text-amber-700",
+  "bg-rose-500/15 border-rose-600 text-rose-700",
+  "bg-purple-500/15 border-purple-600 text-purple-700",
+] as const;
 
 function inicioSemana(ref: Date): Date {
   const d = new Date(ref);
@@ -633,6 +641,8 @@ function DrawerBloqueios({
 const POLLING_DIA_MS = 30_000;
 
 export default function Agenda() {
+  const { resolvedTheme } = useTheme();
+  const CORES = resolvedTheme === "dark" ? CORES_DARK : CORES_LIGHT;
   const { podeAcessar } = useAuth();
   const [modo, setModo] = useState<"semana" | "dia">("semana");
   const [semanaInicio, setSemanaInicio] = useState(() => inicioSemana(new Date()));

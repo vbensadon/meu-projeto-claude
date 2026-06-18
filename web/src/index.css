@@ -2,30 +2,65 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: 'Inter', sans-serif;
-  background-color: #0F1117;
-  color: #E8E9F0;
+/* ── Tokens de cor por tema ─────────────────────────────────────────────── */
+/* Valores em canais RGB separados por espaço para suportar modificadores    */
+/* de opacidade do Tailwind v3: bg-ab-accent/15, text-ab-danger/80, etc.    */
+
+:root {
+  /* Light theme */
+  --ab-bg:           244 245 249;
+  --ab-card:         255 255 255;
+  --ab-border:       226 228 238;
+  --ab-hover:        238 240 248;
+  --ab-accent:       108 99 255;
+  --ab-accent-hover: 91 82 224;
+  --ab-teal:         0 184 148;
+  --ab-danger:       224 62 62;
+  --ab-text:         28 30 46;
+  --ab-muted:        107 111 138;
 }
 
-/* Scrollbar customizada */
+.dark {
+  /* Dark theme — valores originais */
+  --ab-bg:           15 17 23;
+  --ab-card:         26 29 39;
+  --ab-border:       42 45 62;
+  --ab-hover:        30 33 48;
+  --ab-accent:       108 99 255;
+  --ab-accent-hover: 139 92 246;
+  --ab-teal:         0 212 170;
+  --ab-danger:       255 92 92;
+  --ab-text:         232 233 240;
+  --ab-muted:        139 143 168;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: rgb(var(--ab-bg));
+  color: rgb(var(--ab-text));
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+/* ── Scrollbar customizada ──────────────────────────────────────────────── */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #1A1D27;
+  background: rgb(var(--ab-card));
 }
 ::-webkit-scrollbar-thumb {
-  background: #2A2D3E;
+  background: rgb(var(--ab-border));
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #6C63FF;
+  background: rgb(var(--ab-accent));
 }
 
-/* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2A2D3E #1A1D27;
+  scrollbar-color: rgb(var(--ab-border)) rgb(var(--ab-card));
 }

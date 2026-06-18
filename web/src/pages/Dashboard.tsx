@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTheme } from "../contexts/ThemeContext";
 import {
   CartesianGrid,
   Line,
@@ -110,6 +111,15 @@ function SkeletonCard() {
 }
 
 function GraficoLinhaReceita({ dados }: { dados: DashboardResumo["receitaPorDia"] }) {
+  const { resolvedTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
+
+  const gridColor    = dark ? "#2A2D3E" : "#E2E4EE";
+  const axisColor    = dark ? "#8B8FA8" : "#6B6F8A";
+  const tooltipBg    = dark ? "#1A1D27" : "#FFFFFF";
+  const tooltipBorder= dark ? "#2A2D3E" : "#E2E4EE";
+  const tooltipText  = dark ? "#E8E9F0" : "#1C1E2E";
+
   const data = dados.map((d) => ({
     rotulo: new Date(`${d.data}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
     receita: d.receita,
@@ -120,12 +130,12 @@ function GraficoLinhaReceita({ dados }: { dados: DashboardResumo["receitaPorDia"
       <h2 className="font-semibold text-ab-text mb-4">Faturamento por dia</h2>
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#2A2D3E" vertical={false} />
-          <XAxis dataKey="rotulo" stroke="#8B8FA8" fontSize={11} tickLine={false} axisLine={false} />
-          <YAxis stroke="#8B8FA8" fontSize={11} tickLine={false} axisLine={false} width={32} />
+          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
+          <XAxis dataKey="rotulo" stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} />
+          <YAxis stroke={axisColor} fontSize={11} tickLine={false} axisLine={false} width={32} />
           <Tooltip
-            contentStyle={{ backgroundColor: "#1A1D27", border: "1px solid #2A2D3E", borderRadius: 8, fontSize: 12 }}
-            labelStyle={{ color: "#E8E9F0" }}
+            contentStyle={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, fontSize: 12 }}
+            labelStyle={{ color: tooltipText }}
             formatter={(valor) => [formatarMoeda(Number(valor)), "Receita"]}
           />
           <Line type="monotone" dataKey="receita" stroke="#6C63FF" strokeWidth={2.5} dot={{ r: 3, fill: "#6C63FF" }} />

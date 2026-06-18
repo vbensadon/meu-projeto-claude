@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { useTheme, type Theme } from "../contexts/ThemeContext";
 import type { RoleUsuario } from "../lib/types";
 
 interface NavItem {
@@ -153,6 +154,59 @@ const NAV: NavItem[] = [
   },
 ];
 
+const THEME_OPTIONS: { value: Theme; label: string; icon: React.ReactNode }[] = [
+  {
+    value: "light",
+    label: "Claro",
+    icon: (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m8.66-9H21M3 12H2m15.36-6.36l-.71.71M7.05 16.95l-.71.71M18.36 18.36l-.71-.71M6.34 6.34l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z" />
+      </svg>
+    ),
+  },
+  {
+    value: "dark",
+    label: "Escuro",
+    icon: (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+      </svg>
+    ),
+  },
+  {
+    value: "system",
+    label: "Sistema",
+    icon: (
+      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+];
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className="flex gap-0.5 bg-ab-bg rounded-input p-0.5 border border-ab-border">
+      {THEME_OPTIONS.map(({ value, label, icon }) => (
+        <button
+          key={value}
+          title={label}
+          onClick={() => setTheme(value)}
+          className={`flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded text-xs transition-all duration-150 ${
+            theme === value
+              ? "bg-ab-accent text-white"
+              : "text-ab-muted hover:text-ab-text"
+          }`}
+        >
+          {icon}
+          <span className="hidden xl:inline">{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function LogoAgendaBot() {
   return (
     <div className="flex items-center gap-2.5">
@@ -209,6 +263,9 @@ function SidebarConteudo({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="p-3 border-t border-ab-border">
+        <div className="mb-2">
+          <ThemeToggle />
+        </div>
         <div className="flex items-center gap-3 px-3 py-2">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-ab-accent to-ab-accent-hover flex items-center justify-center text-white text-sm font-semibold shrink-0">
             {nomeExibido.charAt(0).toUpperCase()}
@@ -268,6 +325,9 @@ export default function Layout() {
             </svg>
           </button>
           <LogoAgendaBot />
+          <div className="ml-auto">
+            <ThemeToggle />
+          </div>
         </header>
 
         {/* Main */}
