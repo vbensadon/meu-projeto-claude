@@ -6,11 +6,17 @@ interface CredenciaisTwilio {
   numeroOrigem: string;
 }
 
+const MOCK = process.env.TWILIO_MOCK === "true";
+
 export async function enviarMensagem(
   creds: CredenciaisTwilio,
   destinatario: string,
   mensagem: string
 ): Promise<void> {
+  if (MOCK) {
+    console.log(`\n[MOCK] ➜ ${destinatario}\n${mensagem}\n${"─".repeat(40)}`);
+    return;
+  }
   try {
     const client = twilio(creds.accountSid, creds.authToken);
     await client.messages.create({
