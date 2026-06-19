@@ -80,17 +80,8 @@ function buildFallbackText(bodyText: string, options: InteractiveOption[]): stri
   return `${bodyText}\n\n${lista}\n\nDigite o número da opção.`;
 }
 
-const MOCK = process.env.TWILIO_MOCK === "true";
-
 export async function sendInteractiveMessage(params: SendInteractiveParams): Promise<void> {
   const { tenantId, to, bodyText, options, inSession } = params;
-
-  if (MOCK) {
-    const linha = "─".repeat(40);
-    const botoes = options.map((o, i) => `  ${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ""}`).join("\n");
-    console.log(`\n[MOCK] ➜ ${to}\n${bodyText}\n${botoes}\n${linha}`);
-    return;
-  }
 
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
   const client = twilio(tenant.twilio_account_sid, tenant.twilio_auth_token);
