@@ -194,7 +194,13 @@ async function handleProfissional(ctx: ContextoSessao): Promise<ResultadoEstado>
   if (ctx.payloadType === "barber") {
     prof = profissionais.find((p) => p.id === ctx.payloadValue);
   } else {
-    const idx = parseInt(ctx.mensagemEntrada.trim()) - 1;
+    const num = parseInt(ctx.mensagemEntrada.trim());
+    const idx = num - 1;
+    // última opção da lista numerada é sempre "↩ Início"
+    const profOpcoes = await buildProfissionais(ctx.tenantId);
+    if (num === profOpcoes.length + 1) {
+      return handleInicio({ ...ctx, etapa: "INICIO" });
+    }
     if (!isNaN(idx) && idx >= 0 && idx < profissionais.length) prof = profissionais[idx];
   }
 
@@ -250,10 +256,36 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
     }
     dataISO = ctx.payloadValue ?? null;
   } else {
-    const match = ctx.mensagemEntrada.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (match) {
-      const [, dia, mes, ano] = match;
-      dataISO = `${ano}-${mes}-${dia}`;
+    const num = parseInt(ctx.mensagemEntrada.trim());
+    // opções numeradas: 1=Hoje 2=Amanhã 3=Outra data 4=↩ Voltar
+    if (num === 1) { dataISO = isoHoje(); }
+    else if (num === 2) { dataISO = isoAmanha(); }
+    else if (num === 3) {
+      return {
+        resposta: "Por favor, informe a data no formato DD/MM/AAAA (ex: 25/07/2025).\n\nOu digite *cancelar* para recomeçar.",
+        proximaEtapa: "DATA",
+        dadosAtualizados: ctx.dados,
+      };
+    } else if (num === 4) {
+      // ↩ Voltar → profissional
+      const profOpcoes = await buildProfissionais(ctx.tenantId);
+      const texto = await getTexto(
+        ctx.tenantId, "ESCOLHA_PROFISSIONAL",
+        `Você escolheu *${ctx.dados.servico_nome}*.\n\nEscolha o profissional:`,
+        { serviceName: ctx.dados.servico_nome ?? "" }
+      );
+      return {
+        resposta: texto,
+        opcoes: [...profOpcoes, { label: "↩ Início", payload: "nav:back" }],
+        proximaEtapa: "PROFISSIONAL",
+        dadosAtualizados: { ...ctx.dados, profissional_id: undefined, profissional_nome: undefined },
+      };
+    } else {
+      const match = ctx.mensagemEntrada.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (match) {
+        const [, dia, mes, ano] = match;
+        dataISO = `${ano}-${mes}-${dia}`;
+      }
     }
   }
 
@@ -338,8 +370,20 @@ async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
     const candidate = ctx.payloadValue ?? "";
     horario = horarios.includes(candidate) ? candidate : null;
   } else {
-    const idx = parseInt(ctx.mensagemEntrada.trim()) - 1;
-    if (!isNaN(idx) && idx >= 0 && idx < horarios.length) horario = horarios[idx];
+    const num = parseInt(ctx.mensagemEntrada.trim());
+    const slotsExibidos = Math.min(horarios.length, 9);
+    // última opção da lista é sempre "↩ Voltar"
+    if (num === slotsExibidos + 1) {
+      const texto = await getTexto(ctx.tenantId, "ESCOLHA_DATA", "Qual data você prefere?");
+      return {
+        resposta: texto,
+        opcoes: await buildOpcoesData(ctx.tenantId),
+        proximaEtapa: "DATA",
+        dadosAtualizados: { ...ctx.dados, data: undefined, horario: undefined },
+      };
+    }
+    const idx = num - 1;
+    if (!isNaN(idx) && idx >= 0 && idx < slotsExibidos) horario = horarios[idx];
   }
 
   if (!horario) {
@@ -382,8 +426,11 @@ async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
 }
 
 async function handleConfirmacao(ctx: ContextoSessao): Promise<ResultadoEstado> {
-  // ← Voltar → escolher horário novamente
-  if (ctx.payloadType === "nav" && ctx.payloadValue === "back") {
+  const input = ctx.mensagemEntrada.trim().toLowerCase();
+  const num = parseInt(ctx.mensagemEntrada.trim());
+
+  // opções numeradas: 1=Confirmar 2=Cancelar 3=↩ Voltar
+  if (num === 3 || (ctx.payloadType === "nav" && ctx.payloadValue === "back")) {
     const horariosOpcoes = await buildHorarios(
       ctx.tenantId, ctx.dados.profissional_id!, ctx.dados.data!
     );
@@ -401,17 +448,15 @@ async function handleConfirmacao(ctx: ContextoSessao): Promise<ResultadoEstado> 
     };
   }
 
-  const input = ctx.mensagemEntrada.trim().toLowerCase();
-
   const confirmou =
     ctx.payloadType === "confirm"
       ? ctx.payloadValue === "yes"
-      : ["sim", "s", "confirmar"].includes(input);
+      : num === 1 || ["sim", "s", "confirmar"].includes(input);
 
   const cancelou =
     ctx.payloadType === "confirm"
       ? ctx.payloadValue === "no"
-      : ["não", "nao", "n", "cancelar"].includes(input);
+      : num === 2 || ["não", "nao", "n", "cancelar"].includes(input);
 
   if (confirmou) {
     return {
@@ -490,16 +535,17 @@ async function handleConfirmar(ctx: ContextoSessao): Promise<ResultadoEstado> {
 
 async function handleFilaEspera(ctx: ContextoSessao): Promise<ResultadoEstado> {
   const input = ctx.mensagemEntrada.trim().toLowerCase();
+  const num = parseInt(ctx.mensagemEntrada.trim());
 
   const entrou =
     ctx.payloadType === "waitlist"
       ? ctx.payloadValue === "yes"
-      : ["sim", "s"].includes(input);
+      : num === 1 || ["sim", "s"].includes(input);
 
   const recusou =
     ctx.payloadType === "waitlist"
       ? ctx.payloadValue === "no"
-      : ["não", "nao", "n"].includes(input);
+      : num === 2 || ["não", "nao", "n"].includes(input);
 
   if (entrou) {
     return {
