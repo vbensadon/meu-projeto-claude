@@ -40,7 +40,7 @@ async function criarQuickReply(
       },
     },
     friendlyName: `qr_${Date.now()}`,
-    language: "pt",
+    language: "pt_BR",
   });
 
   templateCache.set(key, content.sid);
@@ -68,7 +68,7 @@ async function criarListPicker(
       },
     },
     friendlyName: `lp_${Date.now()}`,
-    language: "pt",
+    language: "pt_BR",
   });
 
   templateCache.set(key, content.sid);
