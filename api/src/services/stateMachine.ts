@@ -59,23 +59,63 @@ function formatarData(iso: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
-function opcoesData(): InteractiveOption[] {
+// ── builders reutilizáveis ─────────────────────────────────────────────────
+
+async function buildServicos(tenantId: string): Promise<InteractiveOption[]> {
+  const servicos = await prisma.servico.findMany({
+    where: { tenant_id: tenantId },
+    orderBy: [{ ordem: "asc" }, { nome: "asc" }],
+  });
+  // reserva 1 slot para "↩ Voltar" → máximo 9 serviços
+  return servicos.slice(0, 9).map((s) => ({
+    label: s.nome,
+    payload: `service:${s.id}`,
+    description: `${s.duracao_minutos}min — R$${Number(s.preco).toFixed(2)}`,
+  }));
+}
+
+async function buildProfissionais(tenantId: string): Promise<InteractiveOption[]> {
+  const profs = await prisma.profissional.findMany({
+    where: { tenant_id: tenantId, ativo: true },
+    orderBy: { nome: "asc" },
+  });
+  return profs.slice(0, 9).map((p) => ({
+    label: p.nome,
+    payload: `barber:${p.id}`,
+  }));
+}
+
+async function buildOpcoesData(tenantId: string): Promise<InteractiveOption[]> {
+  const [labelHoje, labelAmanha, labelOutra] = await getLabels(
+    tenantId, "ESCOLHA_DATA", ["Hoje", "Amanhã", "Outra data"]
+  );
   return [
-    { label: "Hoje", payload: `date:${isoHoje()}` },
-    { label: "Amanhã", payload: `date:${isoAmanha()}` },
-    { label: "Outra data", payload: "date:custom" },
+    { label: labelHoje,   payload: `date:${isoHoje()}` },
+    { label: labelAmanha, payload: `date:${isoAmanha()}` },
+    { label: labelOutra,  payload: "date:custom" },
+    { label: "↩ Voltar",  payload: "nav:back" },
+  ];
+}
+
+async function buildHorarios(
+  tenantId: string,
+  profissionalId: string,
+  dataISO: string
+): Promise<InteractiveOption[] | null> {
+  const horarios = await buscarHorariosDisponiveis(tenantId, profissionalId, dataISO);
+  if (horarios.length === 0) return null;
+  return [
+    ...horarios.slice(0, 9).map((h) => ({ label: h, payload: `slot:${h}` })),
+    { label: "↩ Voltar", payload: "nav:back" },
   ];
 }
 
 // ── handlers ────────────────────────────────────────────────────────────────
 
 async function handleInicio(ctx: ContextoSessao): Promise<ResultadoEstado> {
-  const servicos = await prisma.servico.findMany({
-    where: { tenant_id: ctx.tenantId },
-    orderBy: [{ ordem: "asc" }, { nome: "asc" }],
-  });
+  const opcoesServico = await buildServicos(ctx.tenantId);
 
-  if (servicos.length === 0) {
+  if (opcoesServico.length === 0) {
     return {
       resposta: "Olá! No momento não temos serviços disponíveis. Tente mais tarde.",
       proximaEtapa: "INICIO",
@@ -83,14 +123,11 @@ async function handleInicio(ctx: ContextoSessao): Promise<ResultadoEstado> {
     };
   }
 
-  const opcoes: InteractiveOption[] = servicos.map((s) => ({
-    label: s.nome,
-    payload: `service:${s.id}`,
-    description: `${s.duracao_minutos}min — R$${Number(s.preco).toFixed(2)}`,
-  }));
-
-  const texto = await getTexto(ctx.tenantId, "BOAS_VINDAS", "Olá! Bem-vindo ao agendamento 😊\n\nEscolha o serviço:");
-  return { resposta: texto, opcoes, proximaEtapa: "SERVICO", dadosAtualizados: {} };
+  const texto = await getTexto(
+    ctx.tenantId, "BOAS_VINDAS",
+    "Olá! Bem-vindo ao agendamento 😊\n\nEscolha o serviço:"
+  );
+  return { resposta: texto, opcoes: opcoesServico, proximaEtapa: "SERVICO", dadosAtualizados: {} };
 }
 
 async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
@@ -99,7 +136,7 @@ async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
     orderBy: [{ ordem: "asc" }, { nome: "asc" }],
   });
 
-  let servico = servicos.find(() => false) as (typeof servicos)[0] | undefined;
+  let servico: (typeof servicos)[0] | undefined;
 
   if (ctx.payloadType === "service") {
     servico = servicos.find((s) => s.id === ctx.payloadValue);
@@ -109,11 +146,7 @@ async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
   }
 
   if (!servico) {
-    const opcoes: InteractiveOption[] = servicos.map((s) => ({
-      label: s.nome,
-      payload: `service:${s.id}`,
-      description: `${s.duracao_minutos}min — R$${Number(s.preco).toFixed(2)}`,
-    }));
+    const opcoes = await buildServicos(ctx.tenantId);
     return {
       resposta: "Opção inválida. Por favor, escolha um serviço:",
       opcoes,
@@ -122,12 +155,9 @@ async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
     };
   }
 
-  const profissionais = await prisma.profissional.findMany({
-    where: { tenant_id: ctx.tenantId, ativo: true },
-    orderBy: { nome: "asc" },
-  });
+  const profOpcoes = await buildProfissionais(ctx.tenantId);
 
-  if (profissionais.length === 0) {
+  if (profOpcoes.length === 0) {
     return {
       resposta: "Não há profissionais disponíveis no momento. Tente mais tarde.",
       proximaEtapa: "INICIO",
@@ -135,22 +165,31 @@ async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
     };
   }
 
-  const opcoes: InteractiveOption[] = profissionais.map((p) => ({
-    label: p.nome,
-    payload: `barber:${p.id}`,
-  }));
-
-  const texto = await getTexto(ctx.tenantId, "ESCOLHA_PROFISSIONAL", `Ótimo! Você escolheu *${servico.nome}*.\n\nAgora, escolha o profissional:`, { serviceName: servico.nome });
-  return { resposta: texto, opcoes, proximaEtapa: "PROFISSIONAL", dadosAtualizados: { ...ctx.dados, servico_id: servico.id, servico_nome: servico.nome } };
+  const texto = await getTexto(
+    ctx.tenantId, "ESCOLHA_PROFISSIONAL",
+    `Ótimo! Você escolheu *${servico.nome}*.\n\nAgora, escolha o profissional:`,
+    { serviceName: servico.nome }
+  );
+  return {
+    resposta: texto,
+    opcoes: [...profOpcoes, { label: "↩ Início", payload: "nav:back" }],
+    proximaEtapa: "PROFISSIONAL",
+    dadosAtualizados: { ...ctx.dados, servico_id: servico.id, servico_nome: servico.nome },
+  };
 }
 
 async function handleProfissional(ctx: ContextoSessao): Promise<ResultadoEstado> {
+  // ← Voltar → recomeça do início
+  if (ctx.payloadType === "nav" && ctx.payloadValue === "back") {
+    return handleInicio({ ...ctx, etapa: "INICIO" });
+  }
+
   const profissionais = await prisma.profissional.findMany({
     where: { tenant_id: ctx.tenantId, ativo: true },
     orderBy: { nome: "asc" },
   });
 
-  let prof = profissionais.find(() => false) as (typeof profissionais)[0] | undefined;
+  let prof: (typeof profissionais)[0] | undefined;
 
   if (ctx.payloadType === "barber") {
     prof = profissionais.find((p) => p.id === ctx.payloadValue);
@@ -160,39 +199,51 @@ async function handleProfissional(ctx: ContextoSessao): Promise<ResultadoEstado>
   }
 
   if (!prof) {
-    const opcoes: InteractiveOption[] = profissionais.map((p) => ({
-      label: p.nome,
-      payload: `barber:${p.id}`,
-    }));
+    const profOpcoes = await buildProfissionais(ctx.tenantId);
     return {
       resposta: "Opção inválida. Escolha o profissional:",
-      opcoes,
+      opcoes: [...profOpcoes, { label: "↩ Início", payload: "nav:back" }],
       proximaEtapa: "PROFISSIONAL",
       dadosAtualizados: ctx.dados,
     };
   }
 
-  const [labelHoje, labelAmanha, labelOutra] = await getLabels(ctx.tenantId, "ESCOLHA_DATA", ["Hoje", "Amanhã", "Outra data"]);
-  const texto = await getTexto(ctx.tenantId, "ESCOLHA_DATA", `Perfeito! *${prof.nome}* selecionado.\n\nQual data você prefere?`, { barberName: prof.nome });
+  const texto = await getTexto(
+    ctx.tenantId, "ESCOLHA_DATA",
+    `Perfeito! *${prof.nome}* selecionado.\n\nQual data você prefere?`,
+    { barberName: prof.nome }
+  );
   return {
     resposta: texto,
-    opcoes: [
-      { label: labelHoje, payload: `date:${isoHoje()}` },
-      { label: labelAmanha, payload: `date:${isoAmanha()}` },
-      { label: labelOutra, payload: "date:custom" },
-    ],
+    opcoes: await buildOpcoesData(ctx.tenantId),
     proximaEtapa: "DATA",
     dadosAtualizados: { ...ctx.dados, profissional_id: prof.id, profissional_nome: prof.nome },
   };
 }
 
 async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
+  // ← Voltar → escolher profissional novamente
+  if (ctx.payloadType === "nav" && ctx.payloadValue === "back") {
+    const profOpcoes = await buildProfissionais(ctx.tenantId);
+    const texto = await getTexto(
+      ctx.tenantId, "ESCOLHA_PROFISSIONAL",
+      `Você escolheu *${ctx.dados.servico_nome}*.\n\nEscolha o profissional:`,
+      { serviceName: ctx.dados.servico_nome ?? "" }
+    );
+    return {
+      resposta: texto,
+      opcoes: [...profOpcoes, { label: "↩ Início", payload: "nav:back" }],
+      proximaEtapa: "PROFISSIONAL",
+      dadosAtualizados: { ...ctx.dados, profissional_id: undefined, profissional_nome: undefined },
+    };
+  }
+
   let dataISO: string | null = null;
 
   if (ctx.payloadType === "date") {
     if (ctx.payloadValue === "custom") {
       return {
-        resposta: "Por favor, informe a data no formato DD/MM/AAAA (ex: 15/06/2025).",
+        resposta: "Por favor, informe a data no formato DD/MM/AAAA (ex: 25/07/2025).\n\nOu digite *cancelar* para recomeçar.",
         proximaEtapa: "DATA",
         dadosAtualizados: ctx.dados,
       };
@@ -209,7 +260,7 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
   if (!dataISO) {
     return {
       resposta: "Formato de data inválido. Use DD/MM/AAAA ou escolha uma opção:",
-      opcoes: opcoesData(),
+      opcoes: await buildOpcoesData(ctx.tenantId),
       proximaEtapa: "DATA",
       dadosAtualizados: ctx.dados,
     };
@@ -218,23 +269,21 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
   if (new Date(`${dataISO}T00:00:00`) < new Date(new Date().toDateString())) {
     return {
       resposta: "Essa data já passou. Por favor, informe uma data futura.",
-      opcoes: opcoesData(),
+      opcoes: await buildOpcoesData(ctx.tenantId),
       proximaEtapa: "DATA",
       dadosAtualizados: ctx.dados,
     };
   }
 
-  const horarios = await buscarHorariosDisponiveis(
-    ctx.tenantId,
-    ctx.dados.profissional_id!,
-    dataISO
-  );
-
+  const horariosOpcoes = await buildHorarios(ctx.tenantId, ctx.dados.profissional_id!, dataISO);
   const dataFormatada = formatarData(dataISO);
 
-  if (horarios.length === 0) {
-    const [labelSim, labelNao] = await getLabels(ctx.tenantId, "FILA_ESPERA_PROMPT", ["Sim, entrar na fila", "Não, obrigado"]);
-    const textoFila = await getTexto(ctx.tenantId, "FILA_ESPERA_PROMPT",
+  if (!horariosOpcoes) {
+    const [labelSim, labelNao] = await getLabels(
+      ctx.tenantId, "FILA_ESPERA_PROMPT", ["Sim, entrar na fila", "Não, escolher outra data"]
+    );
+    const textoFila = await getTexto(
+      ctx.tenantId, "FILA_ESPERA_PROMPT",
       MSG_FILA_ESPERA_OFERTA(dataFormatada, ctx.dados.profissional_nome ?? ""),
       { date: dataFormatada, barberName: ctx.dados.profissional_nome ?? "" }
     );
@@ -249,22 +298,34 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
     };
   }
 
-  const textoHorario = await getTexto(ctx.tenantId, "ESCOLHA_HORARIO", `Horários disponíveis em *${dataFormatada}*:`, { date: dataFormatada });
-
-  const opcoes: InteractiveOption[] = horarios.map((h) => ({
-    label: h,
-    payload: `slot:${h}`,
-  }));
-
+  const textoHorario = await getTexto(
+    ctx.tenantId, "ESCOLHA_HORARIO",
+    `Horários disponíveis em *${dataFormatada}*:`,
+    { date: dataFormatada }
+  );
   return {
     resposta: textoHorario,
-    opcoes,
+    opcoes: horariosOpcoes,
     proximaEtapa: "HORARIO",
     dadosAtualizados: { ...ctx.dados, data: dataISO },
   };
 }
 
 async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
+  // ← Voltar → escolher data novamente
+  if (ctx.payloadType === "nav" && ctx.payloadValue === "back") {
+    const texto = await getTexto(
+      ctx.tenantId, "ESCOLHA_DATA",
+      `Qual data você prefere?`
+    );
+    return {
+      resposta: texto,
+      opcoes: await buildOpcoesData(ctx.tenantId),
+      proximaEtapa: "DATA",
+      dadosAtualizados: { ...ctx.dados, data: undefined, horario: undefined },
+    };
+  }
+
   const horarios = await buscarHorariosDisponiveis(
     ctx.tenantId,
     ctx.dados.profissional_id!,
@@ -284,32 +345,36 @@ async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
   if (!horario) {
     return {
       resposta: "Opção inválida. Escolha um horário:",
-      opcoes: horarios.map((h) => ({ label: h, payload: `slot:${h}` })),
+      opcoes: [
+        ...horarios.slice(0, 9).map((h) => ({ label: h, payload: `slot:${h}` })),
+        { label: "↩ Voltar", payload: "nav:back" },
+      ],
       proximaEtapa: "HORARIO",
       dadosAtualizados: ctx.dados,
     };
   }
 
   const dataFormatada = formatarData(ctx.dados.data!);
-  const [labelConfirmar, labelCancelar] = await getLabels(ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", ["✅ Confirmar", "❌ Cancelar"]);
+  const [labelConfirmar, labelCancelar] = await getLabels(
+    ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", ["✅ Confirmar", "❌ Cancelar"]
+  );
   const textoPadrao =
     `Confirme seu agendamento:\n\n` +
     `📋 *Serviço:* ${ctx.dados.servico_nome}\n` +
     `👤 *Profissional:* ${ctx.dados.profissional_nome}\n` +
     `📅 *Data:* ${dataFormatada}\n` +
     `🕐 *Horário:* ${horario}`;
-  const textoConfirm = await getTexto(ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", textoPadrao, {
-    serviceName: ctx.dados.servico_nome ?? "",
-    barberName:  ctx.dados.profissional_nome ?? "",
-    date:        dataFormatada,
-    time:        horario,
-  });
+  const textoConfirm = await getTexto(
+    ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", textoPadrao,
+    { serviceName: ctx.dados.servico_nome ?? "", barberName: ctx.dados.profissional_nome ?? "", date: dataFormatada, time: horario }
+  );
 
   return {
     resposta: textoConfirm,
     opcoes: [
       { label: labelConfirmar, payload: "confirm:yes" },
       { label: labelCancelar,  payload: "confirm:no" },
+      { label: "↩ Voltar",     payload: "nav:back" },
     ],
     proximaEtapa: "CONFIRMACAO",
     dadosAtualizados: { ...ctx.dados, horario },
@@ -317,6 +382,25 @@ async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
 }
 
 async function handleConfirmacao(ctx: ContextoSessao): Promise<ResultadoEstado> {
+  // ← Voltar → escolher horário novamente
+  if (ctx.payloadType === "nav" && ctx.payloadValue === "back") {
+    const horariosOpcoes = await buildHorarios(
+      ctx.tenantId, ctx.dados.profissional_id!, ctx.dados.data!
+    );
+    const dataFormatada = formatarData(ctx.dados.data!);
+    const textoHorario = await getTexto(
+      ctx.tenantId, "ESCOLHA_HORARIO",
+      `Horários disponíveis em *${dataFormatada}*:`,
+      { date: dataFormatada }
+    );
+    return {
+      resposta: textoHorario,
+      opcoes: horariosOpcoes ?? [{ label: "↩ Voltar", payload: "nav:back" }],
+      proximaEtapa: "HORARIO",
+      dadosAtualizados: { ...ctx.dados, horario: undefined },
+    };
+  }
+
   const input = ctx.mensagemEntrada.trim().toLowerCase();
 
   const confirmou =
@@ -331,7 +415,7 @@ async function handleConfirmacao(ctx: ContextoSessao): Promise<ResultadoEstado> 
 
   if (confirmou) {
     return {
-      resposta: "Ótimo! Qual é o seu *nome completo*?",
+      resposta: "Ótimo! Qual é o seu *nome completo*?\n\n_Ou digite *cancelar* para recomeçar._",
       proximaEtapa: "CONFIRMAR",
       dadosAtualizados: ctx.dados,
     };
@@ -356,7 +440,8 @@ async function handleConfirmacao(ctx: ContextoSessao): Promise<ResultadoEstado> 
       `🕐 *Horário:* ${ctx.dados.horario}`,
     opcoes: [
       { label: "✅ Confirmar", payload: "confirm:yes" },
-      { label: "❌ Cancelar", payload: "confirm:no" },
+      { label: "❌ Cancelar",  payload: "confirm:no" },
+      { label: "↩ Voltar",    payload: "nav:back" },
     ],
     proximaEtapa: "CONFIRMACAO",
     dadosAtualizados: ctx.dados,
@@ -368,7 +453,7 @@ async function handleConfirmar(ctx: ContextoSessao): Promise<ResultadoEstado> {
 
   if (nomeCliente.length < 2) {
     return {
-      resposta: "Por favor, informe seu nome completo para confirmar o agendamento.",
+      resposta: "Por favor, informe seu nome completo para confirmar o agendamento.\n\n_Ou digite *cancelar* para recomeçar._",
       proximaEtapa: "CONFIRMAR",
       dadosAtualizados: ctx.dados,
     };
@@ -425,19 +510,24 @@ async function handleFilaEspera(ctx: ContextoSessao): Promise<ResultadoEstado> {
   }
 
   if (recusou) {
+    // "Não" → voltar para escolher outra data
+    const texto = await getTexto(
+      ctx.tenantId, "ESCOLHA_DATA",
+      `Qual outra data você prefere?`
+    );
     return {
-      resposta: MSG_FILA_ESPERA_RECUSADA,
-      opcoes: opcoesData(),
+      resposta: texto,
+      opcoes: await buildOpcoesData(ctx.tenantId),
       proximaEtapa: "DATA",
-      dadosAtualizados: ctx.dados,
+      dadosAtualizados: { ...ctx.dados, data: undefined },
     };
   }
 
   return {
     resposta: MSG_FILA_ESPERA_NAO_ENTENDIDO,
     opcoes: [
-      { label: "Sim, entrar na fila", payload: "waitlist:yes" },
-      { label: "Não, obrigado", payload: "waitlist:no" },
+      { label: "Sim, entrar na fila",       payload: "waitlist:yes" },
+      { label: "Não, escolher outra data",  payload: "waitlist:no" },
     ],
     proximaEtapa: "FILA_ESPERA",
     dadosAtualizados: ctx.dados,
@@ -449,7 +539,7 @@ async function handleFilaNome(ctx: ContextoSessao): Promise<ResultadoEstado> {
 
   if (nomeCliente.length < 2) {
     return {
-      resposta: "Por favor, informe seu nome completo.",
+      resposta: "Por favor, informe seu nome completo.\n\n_Ou digite *cancelar* para recomeçar._",
       proximaEtapa: "FILA_NOME",
       dadosAtualizados: ctx.dados,
     };
@@ -483,20 +573,30 @@ async function handleFilaNome(ctx: ContextoSessao): Promise<ResultadoEstado> {
 
 // ── dispatcher ─────────────────────────────────────────────────────────────
 
+const CANCEL_KEYWORDS = new Set([
+  "cancelar", "cancel", "sair", "reiniciar", "recomeçar",
+  "recomecar", "menu", "inicio", "início", "0", "voltar",
+]);
+
 const handlers: Record<Etapa, (ctx: ContextoSessao) => Promise<ResultadoEstado>> = {
-  INICIO: handleInicio,
-  SERVICO: handleServico,
+  INICIO:       handleInicio,
+  SERVICO:      handleServico,
   PROFISSIONAL: handleProfissional,
-  DATA: handleData,
-  HORARIO: handleHorario,
-  CONFIRMACAO: handleConfirmacao,
-  CONFIRMAR: handleConfirmar,
-  FILA_ESPERA: handleFilaEspera,
-  FILA_NOME: handleFilaNome,
-  CONCLUIDO: handleInicio,
+  DATA:         handleData,
+  HORARIO:      handleHorario,
+  CONFIRMACAO:  handleConfirmacao,
+  CONFIRMAR:    handleConfirmar,
+  FILA_ESPERA:  handleFilaEspera,
+  FILA_NOME:    handleFilaNome,
+  CONCLUIDO:    handleInicio,
 };
 
 export async function processarMensagem(ctx: ContextoSessao): Promise<ResultadoEstado> {
+  // Intercepta palavras globais de cancelamento/reinício em qualquer etapa
+  if (CANCEL_KEYWORDS.has(ctx.mensagemEntrada.trim().toLowerCase())) {
+    return handleInicio({ ...ctx, etapa: "INICIO" });
+  }
+
   const etapaEfetiva: Etapa = ctx.etapa === "CONCLUIDO" ? "INICIO" : ctx.etapa;
   return handlers[etapaEfetiva]({ ...ctx, etapa: etapaEfetiva });
 }
