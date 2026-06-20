@@ -40,7 +40,7 @@ async function criarQuickReply(
       },
     },
     friendlyName: `qr_${Date.now()}`,
-    language: "pt-BR",
+    language: "pt",
   });
 
   templateCache.set(key, content.sid);
@@ -68,7 +68,7 @@ async function criarListPicker(
       },
     },
     friendlyName: `lp_${Date.now()}`,
-    language: "pt-BR",
+    language: "pt",
   });
 
   templateCache.set(key, content.sid);
@@ -104,6 +104,16 @@ export async function sendInteractiveMessage(params: SendInteractiveParams): Pro
   }
 
   // Dentro da sessão: tenta interativo, fallback para texto numerado
+  // list-picker suporta no máximo 10 itens; quick-reply suporta no máximo 3
+  if (options.length > 10) {
+    await client.messages.create({
+      from: tenant.telefone_whatsapp,
+      to,
+      body: buildFallbackText(bodyText, options),
+    });
+    return;
+  }
+
   try {
     let contentSid: string;
 
