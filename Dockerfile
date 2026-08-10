@@ -39,4 +39,4 @@ COPY --from=build-web /app/web/dist         ./web/dist
 EXPOSE 3001
 
 # Aplica migrations e sobe o servidor
-CMD ["sh", "-c", "cd api && npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "cd api && npx prisma migrate deploy && npx prisma db push --skip-generate && node dist/index.js"]
