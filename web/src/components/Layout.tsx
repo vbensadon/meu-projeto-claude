@@ -289,11 +289,34 @@ function SidebarConteudo({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function ImpersonationBanner() {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    if (!payload.isImpersonation) return null;
+    return (
+      <div className="fixed top-0 inset-x-0 z-50 bg-yellow-500 text-yellow-900 text-xs font-semibold px-4 py-1.5 flex items-center justify-between">
+        <span>Sessão de suporte ativa — você está visualizando o painel como o dono desta barbearia.</span>
+        <button
+          onClick={() => { localStorage.removeItem("token"); localStorage.removeItem("tenant"); window.close(); }}
+          className="ml-4 underline hover:no-underline"
+        >
+          Encerrar sessão
+        </button>
+      </div>
+    );
+  } catch { return null; }
+}
+
 export default function Layout() {
   const [menuAberto, setMenuAberto] = useState(false);
+  const token = localStorage.getItem("token");
+  const isImpersonation = (() => { try { return JSON.parse(atob(token!.split(".")[1])).isImpersonation ?? false; } catch { return false; } })();
 
   return (
-    <div className="flex h-screen bg-ab-bg">
+    <div className={`flex h-screen bg-ab-bg ${isImpersonation ? "pt-7" : ""}`}>
+      {isImpersonation && <ImpersonationBanner />}
       {/* Sidebar desktop */}
       <aside className="hidden lg:flex w-60 bg-ab-card flex-col shadow-xl shadow-black/20">
         <SidebarConteudo />

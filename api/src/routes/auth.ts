@@ -117,14 +117,19 @@ router.post("/ativar-conta", async (req: Request, res: Response): Promise<void> 
 
 // Me — retorna dados do usuário atual a partir do token
 router.get("/me", autenticar, async (req: Request, res: Response): Promise<void> => {
+  const base = {
+    role: req.role,
+    isImpersonation: req.isImpersonation ?? false,
+    impersonatedBy: req.impersonatedBy,
+  };
   if (req.usuarioId) {
     const usuario = await prisma.usuario.findUnique({
       where: { id: req.usuarioId },
       select: { id: true, nome: true, email: true, role: true, profissional_id: true },
     });
-    res.json({ role: req.role, usuario });
+    res.json({ ...base, usuario });
   } else {
-    res.json({ role: "dono", usuario: null });
+    res.json({ ...base, usuario: null });
   }
 });
 

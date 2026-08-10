@@ -4,10 +4,12 @@ import jwt from "jsonwebtoken";
 interface JwtPayload {
   tenantId: string;
   slug?: string;
-  // campos presentes apenas em tokens de sub-usuário
   usuarioId?: string;
   role?: string;
   profissionalId?: string;
+  isPlatformUser?: boolean;
+  isImpersonation?: boolean;
+  impersonatedBy?: string;
 }
 
 declare global {
@@ -16,8 +18,10 @@ declare global {
       tenantId: string;
       slug: string;
       usuarioId?: string;
-      role: string;         // "dono" por padrão (token de tenant)
+      role: string;
       profissionalId?: string;
+      isImpersonation?: boolean;
+      impersonatedBy?: string;
     }
   }
 }
@@ -33,12 +37,18 @@ export function autenticar(req: Request, res: Response, next: NextFunction): voi
   const token = authHeader.slice(7);
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+    const payload = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload & { isPlatformUser?: boolean };
+    if (payload.isPlatformUser) {
+      res.status(401).json({ erro: "Token de plataforma não é válido para rotas de tenant." });
+      return;
+    }
     req.tenantId = payload.tenantId;
     req.slug = payload.slug ?? "";
     req.usuarioId = payload.usuarioId;
     req.role = payload.role ?? "dono";
     req.profissionalId = payload.profissionalId;
+    req.isImpersonation = payload.isImpersonation;
+    req.impersonatedBy = payload.impersonatedBy;
     next();
   } catch {
     res.status(401).json({ erro: "Token inválido ou expirado." });

@@ -23,6 +23,7 @@ import configBotRouter from "./routes/configBot";
 import relatoriosRouter from "./routes/relatorios";
 import interactiveMsgsRouter from "./routes/interactiveMsgs";
 import whatsappTemplatesRouter from "./routes/whatsappTemplates";
+import platformRouter from "./routes/platform";
 import { errorHandler } from "./middlewares/errorHandler";
 import { iniciarJobs } from "./jobs";
 
@@ -41,6 +42,9 @@ app.get("/health", (_req, res) => {
 app.use("/webhook", webhookRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/google", googleAuthRouter);
+
+// Plataforma (superadmin)
+app.use("/api/platform", platformRouter);
 
 // Painel (autenticado via JWT no middleware de cada rota)
 app.use("/api/profissionais", profissionaisRouter);

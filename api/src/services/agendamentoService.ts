@@ -4,6 +4,7 @@ import { criarEventoCalendar, cancelarEventoCalendar } from "./calendarService";
 import { enviarMensagem } from "./twilioService";
 import { marcarConvertidosPorAgendamento } from "./listaEsperaService";
 import { upsertCliente } from "./clienteService";
+import { incrementMetric } from "../platform/services/usageMetrics";
 
 export async function criarAgendamento(
   tenantId: string,
@@ -48,6 +49,8 @@ export async function criarAgendamento(
   await upsertCliente(tenantId, dados.cliente_nome!, clienteTelefone, "whatsapp").catch((e) =>
     console.error("[CRM] Falha ao upsert cliente:", e)
   );
+
+  incrementMetric(tenantId, "appointmentsCreated").catch(() => {});
 
   await enviarNotificacoes(tenant, profissional, servico, dados, clienteTelefone, dataHora);
 

@@ -21,6 +21,21 @@ import Equipe from "./pages/Equipe";
 import ConfigBot from "./pages/ConfigBot";
 import MensagensInterativas from "./pages/MensagensInterativas";
 import Configuracoes from "./pages/Configuracoes";
+import PlatformPrivateRoute from "./components/platform/PlatformPrivateRoute";
+import PlatformLayout from "./components/platform/PlatformLayout";
+import PlatformLogin from "./pages/platform/PlatformLogin";
+import PlatformDashboard from "./pages/platform/PlatformDashboard";
+import PlatformTenants from "./pages/platform/PlatformTenants";
+import PlatformTenantNew from "./pages/platform/PlatformTenantNew";
+import PlatformTenantDetail from "./pages/platform/PlatformTenantDetail";
+import PlatformTenantFeatures from "./pages/platform/PlatformTenantFeatures";
+import PlatformPlans from "./pages/platform/PlatformPlans";
+import PlatformAudit from "./pages/platform/PlatformAudit";
+import PlatformAlerts from "./pages/platform/PlatformAlerts";
+import PlatformAlertChannels from "./pages/platform/PlatformAlertChannels";
+import PlatformConversations from "./pages/platform/PlatformConversations";
+import PlatformWebhookEvents from "./pages/platform/PlatformWebhookEvents";
+import PlatformOnboarding from "./pages/platform/PlatformOnboarding";
 
 export default function App() {
   return (
@@ -84,6 +99,31 @@ export default function App() {
         </Route>
 
         <Route path="*" element={<Navigate to="/agenda" replace />} />
+
+        {/* ── Plataforma (superadmin) ─────────────────────────────── */}
+        <Route path="/platform/login" element={<PlatformLogin />} />
+        <Route
+          path="/platform"
+          element={
+            <PlatformPrivateRoute>
+              <PlatformLayout />
+            </PlatformPrivateRoute>
+          }
+        >
+          <Route index element={<Navigate to="/platform/dashboard" replace />} />
+          <Route path="dashboard" element={<PlatformDashboard />} />
+          <Route path="tenants" element={<PlatformTenants />} />
+          <Route path="tenants/new" element={<PlatformTenantNew />} />
+          <Route path="tenants/:id" element={<PlatformTenantDetail />} />
+          <Route path="tenants/:id/features" element={<PlatformTenantFeatures />} />
+          <Route path="plans" element={<PlatformPlans />} />
+          <Route path="audit" element={<PlatformAudit />} />
+          <Route path="alerts" element={<PlatformAlerts />} />
+          <Route path="alerts/channels" element={<PlatformAlertChannels />} />
+          <Route path="tenants/:id/conversations" element={<PlatformConversations />} />
+          <Route path="webhook-events" element={<PlatformWebhookEvents />} />
+          <Route path="onboarding" element={<PlatformOnboarding />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );

@@ -7,10 +7,247 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Camada de Plataforma (superadmin) ────────────────────────────────────────
+
+enum PlatformRole {
+  SUPERADMIN
+  OPERATOR
+  SUPPORT
+}
+
+enum TenantStatus {
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum IntegrationStatus {
+  PENDING
+  CONNECTED
+  EXPIRED
+  ERROR
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
+model PlatformUser {
+  id        String       @id @default(cuid())
+  name      String
+  email     String       @unique
+  password  String
+  role      PlatformRole @default(SUPPORT)
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+
+  audit_logs AuditLog[]
+
+  @@map("platform_users")
+}
+
+model Plan {
+  id           String  @id @default(cuid())
+  name         String
+  priceMonthly Decimal @db.Decimal(10, 2)
+  maxBarbers   Int
+  maxMessages  Int
+  features     Json    @default("{}")
+  active       Boolean @default(true)
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  tenantId         String             @unique
+  planId           String
+  status           SubscriptionStatus @default(TRIAL)
+  trialEndsAt      DateTime?
+  currentPeriodEnd DateTime?
+  createdAt        DateTime           @default(now())
+
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+model FeatureFlag {
+  id       String  @id @default(cuid())
+  tenantId String
+  key      String
+  enabled  Boolean @default(false)
+
+  @@unique([tenantId, key])
+  @@map("feature_flags")
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  platformUserId String
+  action         String
+  targetTenantId String?
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  platformUser PlatformUser @relation(fields: [platformUserId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model ProvisioningLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  step      String
+  status    String
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@map("provisioning_logs")
+}
+
+model UsageMetric {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  date                DateTime @db.Date
+  messagesProcessed   Int      @default(0)
+  appointmentsCreated Int      @default(0)
+  botConversations    Int      @default(0)
+  webhookErrors       Int      @default(0)
+
+  @@unique([tenantId, date])
+  @@map("usage_metrics")
+}
+
+// ── Central de Alertas ───────────────────────────────────────────────────────
+
+enum AlertType {
+  WEBHOOK_FAILURES
+  CALENDAR_TOKEN_EXPIRED
+  MESSAGE_LIMIT_REACHED
+  BOT_INACTIVITY
+  INTEGRATION_ERROR
+  PAYMENT_FAILED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+model PlatformAlert {
+  id          String        @id @default(cuid())
+  tenantId    String?
+  type        AlertType
+  severity    AlertSeverity
+  title       String
+  description String
+  status      AlertStatus   @default(OPEN)
+  metadata    Json?
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  createdAt   DateTime      @default(now())
+
+  @@index([tenantId, type, status])
+  @@map("platform_alerts")
+}
+
+model AlertChannelConfig {
+  id          String        @id @default(cuid())
+  channel     String
+  target      String
+  minSeverity AlertSeverity @default(WARNING)
+  enabled     Boolean       @default(true)
+
+  @@map("alert_channel_configs")
+}
+
+// ── Inspetor de Conversas ─────────────────────────────────────────────────────
+
+enum ConversationStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+model BotConversation {
+  id            String             @id @default(cuid())
+  tenantId      String
+  clientPhone   String
+  clientName    String?
+  currentStep   String?
+  status        ConversationStatus @default(ACTIVE)
+  lastMessageAt DateTime           @default(now())
+  createdAt     DateTime           @default(now())
+
+  messages BotMessage[]
+
+  @@index([tenantId, clientPhone])
+  @@index([tenantId, status])
+  @@map("bot_conversations")
+}
+
+model BotMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  direction      String   // "inbound" | "outbound"
+  body           String
+  payload        String?
+  stepAtTime     String?
+  createdAt      DateTime @default(now())
+
+  conversation BotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("bot_messages")
+}
+
+// ── Replay de Webhook ────────────────────────────────────────────────────────
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  tenantId    String?
+  source      String
+  eventId     String?            // MessageSid ou equivalente para idempotência
+  payload     Json
+  status      WebhookEventStatus @default(RECEIVED)
+  attempts    Int                @default(0)
+  lastError   String?
+  processedAt DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@unique([source, eventId])
+  @@index([tenantId, status])
+  @@map("webhook_events")
+}
+
+// ── Camada de Tenant (negócio) ────────────────────────────────────────────────
+
 model Tenant {
-  id                      String         @id @default(cuid())
+  id                      String            @id @default(cuid())
   nome                    String
-  slug                    String         @unique
+  slug                    String            @unique
   telefone_whatsapp       String
   twilio_account_sid      String
   twilio_auth_token       String
@@ -18,12 +255,17 @@ model Tenant {
   google_access_token     String?
   google_refresh_token    String?
   google_token_expiry     DateTime?
-  plano                   Plano          @default(starter)
-  ativo                   Boolean        @default(true)
+  plano                   Plano             @default(starter)
+  ativo                   Boolean           @default(true)
   senha_hash              String
-  lembretes_ativos        Boolean        @default(true)
-  mensagem_lembrete       String?        // null = usa o template padrão
-  created_at              DateTime       @default(now())
+  lembretes_ativos        Boolean           @default(true)
+  mensagem_lembrete       String?
+  status                  TenantStatus      @default(ACTIVE)
+  whatsappStatus          IntegrationStatus @default(PENDING)
+  calendarStatus          IntegrationStatus @default(PENDING)
+  twilioNumber            String?
+  provisionedAt           DateTime?
+  created_at              DateTime          @default(now())
 
   profissionais        Profissional[]
   servicos             Servico[]
