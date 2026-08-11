@@ -65,7 +65,7 @@ function Variacao({ valor, corPositivaBoa = true }: { valor: number | null; corP
   const bom = corPositivaBoa ? positivo : !positivo;
   return (
     <span
-      className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${
+      className={`self-start w-fit whitespace-nowrap text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${
         bom ? "bg-emerald-500/15 text-emerald-400" : "bg-ab-danger/15 text-ab-danger"
       }`}
     >
@@ -88,15 +88,14 @@ function CardMetrica({
   icone: React.ReactNode;
 }) {
   return (
-    <div className="bg-ab-card border border-ab-border rounded-card p-4 sm:p-5 transition-all duration-200 hover:border-ab-accent/30 flex flex-col gap-2.5 overflow-hidden">
+    <div className="bg-ab-card border border-ab-border rounded-card p-4 sm:p-5 transition-all duration-200 hover:border-ab-accent/30 flex flex-col gap-2 overflow-hidden">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-ab-muted leading-tight min-w-0 truncate">{titulo}</p>
         <span className="shrink-0">{icone}</span>
       </div>
-      <div className="flex items-end justify-between gap-2">
-        <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-ab-text min-w-0 truncate">{valor}</p>
-        <Variacao valor={variacao} corPositivaBoa={corPositivaBoa} />
-      </div>
+      {/* valor em linha própria: largura total, quebra se precisar — nunca corta */}
+      <p className="text-lg sm:text-2xl lg:text-3xl font-bold text-ab-text leading-tight break-words">{valor}</p>
+      <Variacao valor={variacao} corPositivaBoa={corPositivaBoa} />
     </div>
   );
 }
