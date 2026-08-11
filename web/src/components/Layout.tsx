@@ -241,7 +241,7 @@ function SidebarConteudo({ onNavigate }: { onNavigate?: () => void }) {
         <LogoAgendaBot />
       </div>
 
-      <nav className="flex-1 px-3 space-y-1">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 space-y-1">
         {navFiltrado.map(({ to, label, icon }) => (
           <NavLink
             key={to}
@@ -315,7 +315,7 @@ export default function Layout() {
   const isImpersonation = (() => { try { return JSON.parse(atob(token!.split(".")[1])).isImpersonation ?? false; } catch { return false; } })();
 
   return (
-    <div className={`flex h-screen bg-ab-bg ${isImpersonation ? "pt-7" : ""}`}>
+    <div className={`flex h-dvh bg-ab-bg ${isImpersonation ? "pt-7" : ""}`}>
       {isImpersonation && <ImpersonationBanner />}
       {/* Sidebar desktop */}
       <aside className="hidden lg:flex w-60 bg-ab-card flex-col shadow-xl shadow-black/20">
@@ -329,7 +329,7 @@ export default function Layout() {
             className="absolute inset-0 bg-black/50"
             onClick={() => setMenuAberto(false)}
           />
-          <aside className="absolute inset-y-0 left-0 w-64 bg-ab-card flex flex-col shadow-xl shadow-black/40">
+          <aside className="absolute top-0 left-0 h-dvh w-64 bg-ab-card flex flex-col shadow-xl shadow-black/40">
             <SidebarConteudo onNavigate={() => setMenuAberto(false)} />
           </aside>
         </div>

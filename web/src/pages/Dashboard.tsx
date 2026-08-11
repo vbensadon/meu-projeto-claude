@@ -88,13 +88,13 @@ function CardMetrica({
   icone: React.ReactNode;
 }) {
   return (
-    <div className="bg-ab-card border border-ab-border rounded-card p-5 transition-all duration-200 hover:border-ab-accent/30 flex flex-col gap-2.5">
+    <div className="bg-ab-card border border-ab-border rounded-card p-4 sm:p-5 transition-all duration-200 hover:border-ab-accent/30 flex flex-col gap-2.5 overflow-hidden">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-ab-muted leading-tight">{titulo}</p>
-        {icone}
+        <p className="text-sm text-ab-muted leading-tight min-w-0 truncate">{titulo}</p>
+        <span className="shrink-0">{icone}</span>
       </div>
       <div className="flex items-end justify-between gap-2">
-        <p className="text-2xl sm:text-3xl font-bold text-ab-text">{valor}</p>
+        <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-ab-text min-w-0 truncate">{valor}</p>
         <Variacao valor={variacao} corPositivaBoa={corPositivaBoa} />
       </div>
     </div>
