@@ -59,6 +59,45 @@ function formatarData(iso: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
+// Lista formatada dos serviços já escolhidos (fallback para o serviço primário)
+function listaServicos(dados: DadosColetados): string {
+  const nomes =
+    dados.servicos_nomes && dados.servicos_nomes.length > 0
+      ? dados.servicos_nomes
+      : dados.servico_nome
+      ? [dados.servico_nome]
+      : [];
+  return nomes.join(", ");
+}
+
+// Monta a resposta que leva à escolha do profissional (após 1+ serviços)
+async function irParaProfissional(
+  ctx: ContextoSessao,
+  dados: DadosColetados
+): Promise<ResultadoEstado> {
+  const profOpcoes = await buildProfissionais(ctx.tenantId);
+
+  if (profOpcoes.length === 0) {
+    return {
+      resposta: "Não há profissionais disponíveis no momento. Tente mais tarde.",
+      proximaEtapa: "INICIO",
+      dadosAtualizados: {},
+    };
+  }
+
+  const texto = await getTexto(
+    ctx.tenantId, "ESCOLHA_PROFISSIONAL",
+    `Ótimo! Você escolheu *${listaServicos(dados)}*.\n\nAgora, escolha o profissional:`,
+    { serviceName: listaServicos(dados) }
+  );
+  return {
+    resposta: texto,
+    opcoes: [...profOpcoes, { label: "↩ Início", payload: "nav:back" }],
+    proximaEtapa: "PROFISSIONAL",
+    dadosAtualizados: dados,
+  };
+}
+
 // ── builders reutilizáveis ─────────────────────────────────────────────────
 
 async function buildServicos(tenantId: string): Promise<InteractiveOption[]> {
@@ -155,26 +194,82 @@ async function handleServico(ctx: ContextoSessao): Promise<ResultadoEstado> {
     };
   }
 
-  const profOpcoes = await buildProfissionais(ctx.tenantId);
-
-  if (profOpcoes.length === 0) {
-    return {
-      resposta: "Não há profissionais disponíveis no momento. Tente mais tarde.",
-      proximaEtapa: "INICIO",
-      dadosAtualizados: {},
-    };
+  // Acumula o serviço na lista (dedupe por id)
+  const ids = [...(ctx.dados.servicos_ids ?? [])];
+  const nomes = [...(ctx.dados.servicos_nomes ?? [])];
+  if (!ids.includes(servico.id)) {
+    ids.push(servico.id);
+    nomes.push(servico.nome);
   }
 
+  const dados: DadosColetados = {
+    ...ctx.dados,
+    servicos_ids: ids,
+    servicos_nomes: nomes,
+    // serviço primário = primeiro escolhido (retrocompat)
+    servico_id: ids[0],
+    servico_nome: nomes[0],
+  };
+
+  const [labelAdd, labelDone] = await getLabels(
+    ctx.tenantId, "SERVICO_ADICIONAR", ["➕ Adicionar outro", "Continuar →"]
+  );
   const texto = await getTexto(
-    ctx.tenantId, "ESCOLHA_PROFISSIONAL",
-    `Ótimo! Você escolheu *${servico.nome}*.\n\nAgora, escolha o profissional:`,
-    { serviceName: servico.nome }
+    ctx.tenantId, "SERVICO_ADICIONAR",
+    `Adicionado! Serviços até agora: *${listaServicos(dados)}*.\n\nQuer adicionar outro serviço ou continuar?`,
+    { serviceName: listaServicos(dados) }
   );
   return {
     resposta: texto,
-    opcoes: [...profOpcoes, { label: "↩ Início", payload: "nav:back" }],
-    proximaEtapa: "PROFISSIONAL",
-    dadosAtualizados: { ...ctx.dados, servico_id: servico.id, servico_nome: servico.nome },
+    opcoes: [
+      { label: labelAdd,  payload: "svcmore:add" },
+      { label: labelDone, payload: "svcmore:done" },
+    ],
+    proximaEtapa: "SERVICO_MAIS",
+    dadosAtualizados: dados,
+  };
+}
+
+async function handleServicoMais(ctx: ContextoSessao): Promise<ResultadoEstado> {
+  const input = ctx.mensagemEntrada.trim().toLowerCase();
+  const num = parseInt(ctx.mensagemEntrada.trim());
+
+  const adicionar =
+    ctx.payloadType === "svcmore"
+      ? ctx.payloadValue === "add"
+      : num === 1 || ["adicionar", "outro", "mais"].includes(input);
+
+  const continuar =
+    ctx.payloadType === "svcmore"
+      ? ctx.payloadValue === "done"
+      : num === 2 || ["continuar", "seguir", "pronto", "fim"].includes(input);
+
+  if (adicionar) {
+    const opcoes = await buildServicos(ctx.tenantId);
+    return {
+      resposta: `Escolha outro serviço para adicionar:\n\n_Já selecionados: ${listaServicos(ctx.dados)}_`,
+      opcoes,
+      proximaEtapa: "SERVICO",
+      dadosAtualizados: ctx.dados,
+    };
+  }
+
+  if (continuar) {
+    return irParaProfissional(ctx, ctx.dados);
+  }
+
+  // não entendeu → repete a pergunta
+  const [labelAdd, labelDone] = await getLabels(
+    ctx.tenantId, "SERVICO_ADICIONAR", ["➕ Adicionar outro", "Continuar →"]
+  );
+  return {
+    resposta: `Não entendi. Serviços até agora: *${listaServicos(ctx.dados)}*.\n\nQuer adicionar outro serviço ou continuar?`,
+    opcoes: [
+      { label: labelAdd,  payload: "svcmore:add" },
+      { label: labelDone, payload: "svcmore:done" },
+    ],
+    proximaEtapa: "SERVICO_MAIS",
+    dadosAtualizados: ctx.dados,
   };
 }
 
@@ -233,8 +328,8 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
     const profOpcoes = await buildProfissionais(ctx.tenantId);
     const texto = await getTexto(
       ctx.tenantId, "ESCOLHA_PROFISSIONAL",
-      `Você escolheu *${ctx.dados.servico_nome}*.\n\nEscolha o profissional:`,
-      { serviceName: ctx.dados.servico_nome ?? "" }
+      `Você escolheu *${listaServicos(ctx.dados)}*.\n\nEscolha o profissional:`,
+      { serviceName: listaServicos(ctx.dados) }
     );
     return {
       resposta: texto,
@@ -256,7 +351,10 @@ async function handleData(ctx: ContextoSessao): Promise<ResultadoEstado> {
     }
     dataISO = ctx.payloadValue ?? null;
   } else {
-    const num = parseInt(ctx.mensagemEntrada.trim());
+    // só interpreta como opção numerada se a entrada for um número puro,
+    // senão "01/01/2026" viraria parseInt=1 (Hoje) e engoliria a data digitada
+    const entrada = ctx.mensagemEntrada.trim();
+    const num = /^\d+$/.test(entrada) ? parseInt(entrada) : NaN;
     // opções numeradas: 1=Hoje 2=Amanhã 3=Outra data 4=↩ Voltar
     if (num === 1) { dataISO = isoHoje(); }
     else if (num === 2) { dataISO = isoAmanha(); }
@@ -404,13 +502,13 @@ async function handleHorario(ctx: ContextoSessao): Promise<ResultadoEstado> {
   );
   const textoPadrao =
     `Confirme seu agendamento:\n\n` +
-    `📋 *Serviço:* ${ctx.dados.servico_nome}\n` +
+    `📋 *Serviços:* ${listaServicos(ctx.dados)}\n` +
     `👤 *Profissional:* ${ctx.dados.profissional_nome}\n` +
     `📅 *Data:* ${dataFormatada}\n` +
     `🕐 *Horário:* ${horario}`;
   const textoConfirm = await getTexto(
     ctx.tenantId, "CONFIRMACAO_AGENDAMENTO", textoPadrao,
-    { serviceName: ctx.dados.servico_nome ?? "", barberName: ctx.dados.profissional_nome ?? "", date: dataFormatada, time: horario }
+    { serviceName: listaServicos(ctx.dados), barberName: ctx.dados.profissional_nome ?? "", date: dataFormatada, time: horario }
   );
 
   return {
@@ -479,7 +577,7 @@ async function handleConfirmacao(ctx: ContextoSessao): Promise<ResultadoEstado> 
   return {
     resposta:
       `Não entendi. Por favor, confirme:\n\n` +
-      `📋 *Serviço:* ${ctx.dados.servico_nome}\n` +
+      `📋 *Serviços:* ${listaServicos(ctx.dados)}\n` +
       `👤 *Profissional:* ${ctx.dados.profissional_nome}\n` +
       `📅 *Data:* ${dataFormatada}\n` +
       `🕐 *Horário:* ${ctx.dados.horario}`,
@@ -523,7 +621,7 @@ async function handleConfirmar(ctx: ContextoSessao): Promise<ResultadoEstado> {
     resposta:
       `✅ *Agendamento confirmado!*\n\n` +
       `Obrigado, *${nomeCliente}*!\n\n` +
-      `📋 ${ctx.dados.servico_nome}\n` +
+      `📋 ${listaServicos(ctx.dados)}\n` +
       `👤 ${ctx.dados.profissional_nome}\n` +
       `📅 ${dataFormatada} às ${ctx.dados.horario}\n\n` +
       `Até lá! 😊`,
@@ -627,6 +725,7 @@ const CANCEL_KEYWORDS = new Set([
 const handlers: Record<Etapa, (ctx: ContextoSessao) => Promise<ResultadoEstado>> = {
   INICIO:       handleInicio,
   SERVICO:      handleServico,
+  SERVICO_MAIS: handleServicoMais,
   PROFISSIONAL: handleProfissional,
   DATA:         handleData,
   HORARIO:      handleHorario,

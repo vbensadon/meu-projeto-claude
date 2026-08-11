@@ -1,6 +1,7 @@
 export type Etapa =
   | "INICIO"
   | "SERVICO"
+  | "SERVICO_MAIS"  // pergunta se quer adicionar outro serviço ou continuar
   | "PROFISSIONAL"
   | "DATA"
   | "HORARIO"
@@ -11,8 +12,12 @@ export type Etapa =
   | "CONCLUIDO";
 
 export interface DadosColetados {
+  // servico_id/servico_nome = serviço PRIMÁRIO (primeiro escolhido) — retrocompat
   servico_id?: string;
   servico_nome?: string;
+  // Lista completa de serviços do agendamento (1 ou mais)
+  servicos_ids?: string[];
+  servicos_nomes?: string[];
   profissional_id?: string;
   profissional_nome?: string;
   data?: string; // YYYY-MM-DD

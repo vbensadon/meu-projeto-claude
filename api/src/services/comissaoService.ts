@@ -33,6 +33,42 @@ export async function calcularERegistrarComissao(
   });
 }
 
+// Comissão para agendamento com múltiplos serviços: resolve a regra POR serviço
+// e soma num único lançamento (mantém o @unique de agendamento_id).
+export async function calcularERegistrarComissaoMulti(
+  tenantId: string,
+  agendamentoId: string,
+  profissionalId: string,
+  itens: { servicoId: string; preco: number }[]
+): Promise<void> {
+  const existente = await prisma.lancamentoComissao.findUnique({ where: { agendamento_id: agendamentoId } });
+  if (existente) return;
+  if (itens.length === 0) return;
+
+  const resultados = await Promise.all(
+    itens.map((it) => resolverRegra(tenantId, profissionalId, it.servicoId, it.preco))
+  );
+
+  const valorBruto = resultados.reduce((s, r) => s + r.valor_bruto, 0);
+  const comissaoValor = Math.round(resultados.reduce((s, r) => s + r.comissao_valor, 0) * 100) / 100;
+  // percentual efetivo (comissão / bruto) — regra_id fica nulo pois pode haver várias regras
+  const pctEfetivo = valorBruto > 0 ? Math.round((comissaoValor / valorBruto) * 100 * 100) / 100 : 0;
+  // se todos os itens usaram a mesma regra, preserva o id
+  const regraUnica = resultados.every((r) => r.regra_id === resultados[0].regra_id) ? resultados[0].regra_id : null;
+
+  await prisma.lancamentoComissao.create({
+    data: {
+      tenant_id: tenantId,
+      profissional_id: profissionalId,
+      agendamento_id: agendamentoId,
+      regra_id: regraUnica,
+      valor_bruto: valorBruto,
+      comissao_percentual: pctEfetivo,
+      comissao_valor: comissaoValor,
+    },
+  });
+}
+
 async function resolverRegra(
   tenantId: string,
   profissionalId: string,

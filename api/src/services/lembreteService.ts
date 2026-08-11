@@ -32,16 +32,24 @@ export async function processarLembretes(): Promise<void> {
       lembrete_enviado_em: null,
       tenant: { lembretes_ativos: true },
     },
-    include: { tenant: true, profissional: true, servico: true },
+    include: {
+      tenant: true,
+      profissional: true,
+      servico: true,
+      itens_servico: { include: { servico: { select: { nome: true } } }, orderBy: { ordem: "asc" } },
+    },
   });
 
   for (const ag of agendamentos) {
+    const nomesServicos = ag.itens_servico.length > 0
+      ? ag.itens_servico.map((i) => i.servico.nome).join(", ")
+      : ag.servico.nome;
     const template = ag.tenant.mensagem_lembrete ?? MSG_LEMBRETE_PADRAO;
     const mensagem = renderizarMensagemLembrete(template, {
       clientName: ag.cliente_nome,
       date: ag.data_hora.toLocaleDateString("pt-BR"),
       time: ag.data_hora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-      serviceName: ag.servico.nome,
+      serviceName: nomesServicos,
       barberName: ag.profissional.nome,
     });
 
@@ -71,7 +79,7 @@ export async function processarLembretes(): Promise<void> {
               "1": ag.cliente_nome,
               "2": ag.data_hora.toLocaleDateString("pt-BR"),
               "3": ag.data_hora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-              "4": ag.servico.nome,
+              "4": nomesServicos,
               "5": ag.profissional.nome,
             },
           });

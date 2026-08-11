@@ -54,11 +54,23 @@ function formatarHora(d: Date): string {
 // onde o outro começa), senão eles colam e parecem um único card quebrado.
 const GAP_VERTICAL = 2;
 
+// ── helpers multi-serviço (itens_servico com fallback ao serviço primário) ──
+function servicosDoAgendamento(ag: Agendamento): { id: string; nome: string; duracao_minutos: number; preco: string }[] {
+  if (ag.itens_servico && ag.itens_servico.length > 0) return ag.itens_servico.map((i) => i.servico);
+  return [ag.servico];
+}
+function duracaoTotalAgendamento(ag: Agendamento): number {
+  return servicosDoAgendamento(ag).reduce((s, sv) => s + sv.duracao_minutos, 0);
+}
+function nomesServicosAgendamento(ag: Agendamento): string {
+  return servicosDoAgendamento(ag).map((s) => s.nome).join(", ");
+}
+
 function posicaoAgendamento(ag: Agendamento): { top: number; height: number } {
   const dt = new Date(ag.data_hora);
   const minutosDesdeMeiaNoite = dt.getHours() * 60 + dt.getMinutes();
   const topBruto = (minutosDesdeMeiaNoite / 60) * ALTURA_HORA;
-  const alturaBruta = Math.max((ag.servico.duracao_minutos / 60) * ALTURA_HORA, 28);
+  const alturaBruta = Math.max((duracaoTotalAgendamento(ag) / 60) * ALTURA_HORA, 28);
   return { top: topBruto + GAP_VERTICAL / 2, height: alturaBruta - GAP_VERTICAL };
 }
 
@@ -80,7 +92,7 @@ function layoutDoDia(ags: Agendamento[]): Map<string, { lane: number; totalLanes
   const eventos = ags
     .map((a) => {
       const inicio = new Date(a.data_hora).getTime();
-      const fim = inicio + a.servico.duracao_minutos * 60_000;
+      const fim = inicio + duracaoTotalAgendamento(a) * 60_000;
       return { id: a.id, inicio, fim };
     })
     .sort((a, b) => a.inicio - b.inicio);
@@ -140,7 +152,7 @@ function ModalAgendar({
 }) {
   const hojeISO = toISO(new Date());
   const [profissionalId, setProfissionalId] = useState(inicial?.profissionalId ?? "");
-  const [servicoId, setServicoId] = useState("");
+  const [servicoIds, setServicoIds] = useState<string[]>([]);
   const [data, setData] = useState(inicial?.data ?? hojeISO);
   const [horario, setHorario] = useState("");
   const [nome, setNome] = useState("");
@@ -151,21 +163,25 @@ function ModalAgendar({
   const [salvando, setSalvando] = useState(false);
   const horarioPreSelecionado = useRef(inicial?.horario);
 
-  const servico = servicos.find((s) => s.id === servicoId);
+  const servicosSelecionados = servicos.filter((s) => servicoIds.includes(s.id));
+  const duracaoSelecionada = servicosSelecionados.reduce((sum, s) => sum + s.duracao_minutos, 0);
+  const precoSelecionado = servicosSelecionados.reduce((sum, s) => sum + Number(s.preco), 0);
+  const toggleServico = (id: string) =>
+    setServicoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   useEffect(() => {
     setHorario("");
-    if (!profissionalId || !servicoId || !data) { setHorariosLivres([]); return; }
+    if (!profissionalId || servicoIds.length === 0 || !data) { setHorariosLivres([]); return; }
     setCarregandoHorarios(true);
     api
       .get<Agendamento[]>(`/agendamentos?data=${data}&profissional_id=${profissionalId}`)
       .then((r) => {
-        const duracao = servico?.duracao_minutos ?? 30;
+        const duracao = duracaoSelecionada || 30;
         const ocupados = r.data
           .filter((a) => a.status !== "cancelado")
           .map((a) => {
             const inicio = new Date(a.data_hora);
-            return { inicio, fim: new Date(inicio.getTime() + a.servico.duracao_minutos * 60_000) };
+            return { inicio, fim: new Date(inicio.getTime() + duracaoTotalAgendamento(a) * 60_000) };
           });
         const livres = gerarSlotsBase().filter((h) => {
           const [hh, mm] = h.split(":").map(Number);
@@ -182,11 +198,11 @@ function ModalAgendar({
       })
       .finally(() => setCarregandoHorarios(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profissionalId, servicoId, data]);
+  }, [profissionalId, servicoIds, data]);
 
   const salvar = async () => {
-    if (!profissionalId || !servicoId || !horario || !nome.trim() || !telefone.trim()) {
-      setErro("Preencha todos os campos.");
+    if (!profissionalId || servicoIds.length === 0 || !horario || !nome.trim() || !telefone.trim()) {
+      setErro("Preencha todos os campos e escolha ao menos um serviço.");
       return;
     }
     setErro("");
@@ -198,7 +214,7 @@ function ModalAgendar({
 
       const { data: criado } = await api.post<Agendamento>("/agendamentos", {
         profissional_id: profissionalId,
-        servico_id: servicoId,
+        servicos_ids: servicoIds,
         cliente_nome: nome.trim(),
         cliente_telefone: telefone.trim(),
         data_hora: dataHora.toISOString(),
@@ -238,13 +254,26 @@ function ModalAgendar({
             </select>
           </div>
           <div>
-            <label className="text-xs text-ab-muted block mb-1">Serviço</label>
-            <select className={campoClass} value={servicoId} onChange={(e) => setServicoId(e.target.value)}>
-              <option value="">Selecione...</option>
+            <label className="text-xs text-ab-muted block mb-1">Serviços (selecione 1 ou mais)</label>
+            <div className="max-h-40 overflow-y-auto border border-ab-border rounded-input divide-y divide-ab-border">
               {servicos.map((s) => (
-                <option key={s.id} value={s.id}>{s.nome}</option>
+                <label key={s.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-ab-bg/40">
+                  <input
+                    type="checkbox"
+                    className="accent-ab-accent"
+                    checked={servicoIds.includes(s.id)}
+                    onChange={() => toggleServico(s.id)}
+                  />
+                  <span className="text-sm text-ab-text flex-1">{s.nome}</span>
+                  <span className="text-xs text-ab-muted">{s.duracao_minutos}min · R${Number(s.preco).toFixed(2)}</span>
+                </label>
               ))}
-            </select>
+            </div>
+            {servicoIds.length > 0 && (
+              <p className="text-xs text-ab-muted mt-1">
+                Total: {duracaoSelecionada}min · R${precoSelecionado.toFixed(2)}
+              </p>
+            )}
           </div>
           <div>
             <label className="text-xs text-ab-muted block mb-1">Data</label>
@@ -315,7 +344,11 @@ function ModalEditar({
 }) {
   const dataOriginal = new Date(agendamento.data_hora);
   const [profissionalId, setProfissionalId] = useState(agendamento.profissional.id);
-  const [servicoId, setServicoId] = useState(agendamento.servico.id);
+  const [servicoIds, setServicoIds] = useState<string[]>(
+    agendamento.itens_servico && agendamento.itens_servico.length > 0
+      ? agendamento.itens_servico.map((i) => i.servico_id)
+      : [agendamento.servico.id]
+  );
   const [data, setData] = useState(toISO(dataOriginal));
   const [horario, setHorario] = useState(formatarHora(dataOriginal));
   const [nome, setNome] = useState(agendamento.cliente_nome);
@@ -323,9 +356,15 @@ function ModalEditar({
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
+  const servicosSelecionados = servicos.filter((s) => servicoIds.includes(s.id));
+  const duracaoSelecionada = servicosSelecionados.reduce((sum, s) => sum + s.duracao_minutos, 0);
+  const precoSelecionado = servicosSelecionados.reduce((sum, s) => sum + Number(s.preco), 0);
+  const toggleServico = (id: string) =>
+    setServicoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
   const salvar = async () => {
-    if (!profissionalId || !servicoId || !horario || !nome.trim() || !telefone.trim()) {
-      setErro("Preencha todos os campos.");
+    if (!profissionalId || servicoIds.length === 0 || !horario || !nome.trim() || !telefone.trim()) {
+      setErro("Preencha todos os campos e escolha ao menos um serviço.");
       return;
     }
     setErro("");
@@ -337,7 +376,7 @@ function ModalEditar({
 
       const { data: atualizado } = await api.patch<Agendamento>(`/agendamentos/${agendamento.id}`, {
         profissional_id: profissionalId,
-        servico_id: servicoId,
+        servicos_ids: servicoIds,
         cliente_nome: nome.trim(),
         cliente_telefone: telefone.trim(),
         data_hora: dataHora.toISOString(),
@@ -375,12 +414,26 @@ function ModalEditar({
             </select>
           </div>
           <div>
-            <label className="text-xs text-ab-muted block mb-1">Serviço</label>
-            <select className={campoClass} value={servicoId} onChange={(e) => setServicoId(e.target.value)}>
+            <label className="text-xs text-ab-muted block mb-1">Serviços (selecione 1 ou mais)</label>
+            <div className="max-h-40 overflow-y-auto border border-ab-border rounded-input divide-y divide-ab-border">
               {servicos.map((s) => (
-                <option key={s.id} value={s.id}>{s.nome}</option>
+                <label key={s.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-ab-bg/40">
+                  <input
+                    type="checkbox"
+                    className="accent-ab-accent"
+                    checked={servicoIds.includes(s.id)}
+                    onChange={() => toggleServico(s.id)}
+                  />
+                  <span className="text-sm text-ab-text flex-1">{s.nome}</span>
+                  <span className="text-xs text-ab-muted">{s.duracao_minutos}min · R${Number(s.preco).toFixed(2)}</span>
+                </label>
               ))}
-            </select>
+            </div>
+            {servicoIds.length > 0 && (
+              <p className="text-xs text-ab-muted mt-1">
+                Total: {duracaoSelecionada}min · R${precoSelecionado.toFixed(2)}
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1031,7 +1084,7 @@ export default function Agenda() {
                           ${isCancelado ? "opacity-30 line-through" : `${cor} cursor-grab active:cursor-grabbing hover:brightness-125`}
                           ${arrastando === ag.id ? "opacity-40" : ""}`}>
                         <p className="font-medium leading-tight truncate">{ag.cliente_nome}</p>
-                        <p className="truncate opacity-75">{ag.servico.nome}</p>
+                        <p className="truncate opacity-75">{nomesServicosAgendamento(ag)}</p>
                       </div>
                     );
                   })}
@@ -1124,7 +1177,7 @@ export default function Agenda() {
                           ${isCancelado ? "opacity-30 line-through" : `${cor} cursor-grab active:cursor-grabbing hover:brightness-125`}
                           ${arrastando === ag.id ? "opacity-40" : ""}`}>
                         <p className="font-medium leading-tight truncate">{ag.cliente_nome}</p>
-                        <p className="truncate opacity-75">{ag.servico.nome}</p>
+                        <p className="truncate opacity-75">{nomesServicosAgendamento(ag)}</p>
                       </div>
                     );
                   })}

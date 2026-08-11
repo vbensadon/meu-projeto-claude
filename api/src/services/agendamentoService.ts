@@ -15,9 +15,26 @@ export async function criarAgendamento(
   const profissional = await prisma.profissional.findUniqueOrThrow({
     where: { id: dados.profissional_id! },
   });
-  const servico = await prisma.servico.findUniqueOrThrow({
-    where: { id: dados.servico_id! },
+
+  // Lista de serviços (1+). Fallback para o serviço primário se não houver array.
+  const servicoIds =
+    dados.servicos_ids && dados.servicos_ids.length > 0
+      ? dados.servicos_ids
+      : dados.servico_id
+      ? [dados.servico_id]
+      : [];
+  const servicosDb = await prisma.servico.findMany({
+    where: { id: { in: servicoIds }, tenant_id: tenantId },
   });
+  // Preserva a ordem de escolha do cliente
+  const servicos = servicoIds
+    .map((id) => servicosDb.find((s) => s.id === id))
+    .filter((s): s is (typeof servicosDb)[number] => Boolean(s));
+  if (servicos.length === 0) throw new Error("Nenhum serviço válido para o agendamento");
+
+  const duracaoTotal = servicos.reduce((sum, s) => sum + s.duracao_minutos, 0);
+  const precoTotal = servicos.reduce((sum, s) => sum + Number(s.preco), 0);
+  const nomesServicos = servicos.map((s) => s.nome).join(", ");
 
   const [hora, minuto] = dados.horario!.split(":").map(Number);
   const dataHora = new Date(`${dados.data!}T${String(hora).padStart(2, "0")}:${String(minuto).padStart(2, "0")}:00`);
@@ -26,9 +43,9 @@ export async function criarAgendamento(
   const googleEventId = await criarEventoCalendar(
     tenantId,
     calendarId,
-    `${servico.nome} — ${dados.cliente_nome}`,
+    `${nomesServicos} — ${dados.cliente_nome}`,
     dataHora,
-    servico.duracao_minutos,
+    duracaoTotal,
     `Cliente: ${dados.cliente_nome} | Tel: ${clienteTelefone}`
   );
 
@@ -36,13 +53,20 @@ export async function criarAgendamento(
     data: {
       tenant_id: tenantId,
       profissional_id: dados.profissional_id!,
-      servico_id: dados.servico_id!,
+      servico_id: servicos[0].id, // serviço primário
       cliente_nome: dados.cliente_nome!,
       cliente_telefone: clienteTelefone,
       data_hora: dataHora,
       status: "confirmado",
-      preco: servico.preco,
+      preco: precoTotal,
       google_event_id: googleEventId,
+      itens_servico: {
+        create: servicos.map((s, i) => ({
+          servico_id: s.id,
+          preco: s.preco,
+          ordem: i,
+        })),
+      },
     },
   });
 
@@ -52,7 +76,7 @@ export async function criarAgendamento(
 
   incrementMetric(tenantId, "appointmentsCreated").catch(() => {});
 
-  await enviarNotificacoes(tenant, profissional, servico, dados, clienteTelefone, dataHora);
+  await enviarNotificacoes(tenant, profissional, { nome: nomesServicos }, dados, clienteTelefone, dataHora);
 
   await marcarConvertidosPorAgendamento(tenantId, clienteTelefone, dados.profissional_id!, dataHora).catch((e) =>
     console.error("[ListaEspera] Falha ao marcar conversão:", e)

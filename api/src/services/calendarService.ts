@@ -67,13 +67,23 @@ async function buscarOcupadosBanco(
       data_hora: { gte: inicioDia, lte: fimDia },
       status: { not: "cancelado" },
     },
-    include: { servico: { select: { duracao_minutos: true } } },
+    include: {
+      servico: { select: { duracao_minutos: true } },
+      itens_servico: { include: { servico: { select: { duracao_minutos: true } } } },
+    },
   });
 
-  return agendamentos.map((a) => ({
-    inicio: a.data_hora,
-    fim: new Date(a.data_hora.getTime() + a.servico.duracao_minutos * 60_000),
-  }));
+  return agendamentos.map((a) => {
+    // duração = soma dos itens; fallback para o serviço primário (agendamentos antigos)
+    const duracao =
+      a.itens_servico && a.itens_servico.length > 0
+        ? a.itens_servico.reduce((sum, it) => sum + it.servico.duracao_minutos, 0)
+        : a.servico.duracao_minutos;
+    return {
+      inicio: a.data_hora,
+      fim: new Date(a.data_hora.getTime() + duracao * 60_000),
+    };
+  });
 }
 
 async function buscarBloqueios(

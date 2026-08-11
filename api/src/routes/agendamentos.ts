@@ -8,10 +8,28 @@ import { criarEventoCalendar, atualizarEventoCalendar } from "../services/calend
 import { upsertCliente } from "../services/clienteService";
 import { gerarTokenAvaliacao } from "./avaliar";
 import { enviarMensagem } from "../services/twilioService";
-import { calcularERegistrarComissao } from "../services/comissaoService";
+import { calcularERegistrarComissaoMulti } from "../services/comissaoService";
 
 const router = Router();
 router.use(autenticar);
+
+// include padrão de serviços (primário + itens) para respostas da API
+const INCLUDE_SERVICOS = {
+  profissional: { select: { id: true, nome: true } },
+  servico: { select: { id: true, nome: true, duracao_minutos: true, preco: true } },
+  itens_servico: {
+    include: { servico: { select: { id: true, nome: true, duracao_minutos: true, preco: true } } },
+    orderBy: { ordem: "asc" as const },
+  },
+} as const;
+
+// Carrega serviços de um tenant preservando a ordem dos ids informados
+async function carregarServicosOrdenados(tenantId: string, ids: string[]) {
+  const db = await prisma.servico.findMany({ where: { id: { in: ids }, tenant_id: tenantId } });
+  return ids
+    .map((id) => db.find((s) => s.id === id))
+    .filter((s): s is (typeof db)[number] => Boolean(s));
+}
 
 const QuerySchema = z.object({
   data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -19,13 +37,18 @@ const QuerySchema = z.object({
   status: z.enum(["pendente", "confirmado", "cancelado", "concluido", "nao_compareceu"]).optional(),
 });
 
-const AgendamentoManualSchema = z.object({
-  profissional_id: z.string().min(1),
-  servico_id: z.string().min(1),
-  cliente_nome: z.string().min(1).max(150),
-  cliente_telefone: z.string().min(1),
-  data_hora: z.string().datetime(),
-});
+const AgendamentoManualSchema = z
+  .object({
+    profissional_id: z.string().min(1),
+    servico_id: z.string().min(1).optional(),
+    servicos_ids: z.array(z.string().min(1)).min(1).optional(),
+    cliente_nome: z.string().min(1).max(150),
+    cliente_telefone: z.string().min(1),
+    data_hora: z.string().datetime(),
+  })
+  .refine((d) => d.servico_id || (d.servicos_ids && d.servicos_ids.length > 0), {
+    message: "Informe ao menos um serviço.",
+  });
 
 router.get("/", async (req, res: Response): Promise<void> => {
   const { tenantId } = req;
@@ -53,10 +76,7 @@ router.get("/", async (req, res: Response): Promise<void> => {
 
   const agendamentos = await prisma.agendamento.findMany({
     where,
-    include: {
-      profissional: { select: { id: true, nome: true } },
-      servico: { select: { id: true, nome: true, duracao_minutos: true, preco: true } },
-    },
+    include: INCLUDE_SERVICOS,
     orderBy: { data_hora: "asc" },
   });
 
@@ -71,18 +91,23 @@ router.post("/", async (req, res: Response): Promise<void> => {
     return;
   }
 
-  const { profissional_id, servico_id, cliente_nome, cliente_telefone, data_hora } = parsed.data;
+  const { profissional_id, cliente_nome, cliente_telefone, data_hora } = parsed.data;
+  const idsServico = parsed.data.servicos_ids?.length ? parsed.data.servicos_ids : [parsed.data.servico_id!];
 
-  const [profissional, servico] = await Promise.all([
+  const [profissional, servicos] = await Promise.all([
     prisma.profissional.findFirst({ where: { id: profissional_id, tenant_id: tenantId } }),
-    prisma.servico.findFirst({ where: { id: servico_id, tenant_id: tenantId } }),
+    carregarServicosOrdenados(tenantId, idsServico),
   ]);
 
   if (!profissional) { res.status(404).json({ erro: "Profissional não encontrado." }); return; }
-  if (!servico) { res.status(404).json({ erro: "Serviço não encontrado." }); return; }
+  if (servicos.length === 0) { res.status(404).json({ erro: "Serviço não encontrado." }); return; }
+
+  const duracaoTotal = servicos.reduce((sum, s) => sum + s.duracao_minutos, 0);
+  const precoTotal = servicos.reduce((sum, s) => sum + Number(s.preco), 0);
+  const nomesServicos = servicos.map((s) => s.nome).join(", ");
 
   const novoInicio = new Date(data_hora);
-  const novoFim = new Date(novoInicio.getTime() + servico.duracao_minutos * 60_000);
+  const novoFim = new Date(novoInicio.getTime() + duracaoTotal * 60_000);
   const inicioDia = new Date(novoInicio.toDateString());
   const fimDia = new Date(inicioDia.getTime() + 86400000);
 
@@ -93,11 +118,17 @@ router.post("/", async (req, res: Response): Promise<void> => {
       status: { not: "cancelado" },
       data_hora: { gte: inicioDia, lt: fimDia },
     },
-    include: { servico: { select: { duracao_minutos: true } } },
+    include: {
+      servico: { select: { duracao_minutos: true } },
+      itens_servico: { include: { servico: { select: { duracao_minutos: true } } } },
+    },
   });
 
   const temConflito = agendamentosDoDia.some((a) => {
-    const fim = new Date(a.data_hora.getTime() + a.servico.duracao_minutos * 60_000);
+    const dur = a.itens_servico && a.itens_servico.length > 0
+      ? a.itens_servico.reduce((s, it) => s + it.servico.duracao_minutos, 0)
+      : a.servico.duracao_minutos;
+    const fim = new Date(a.data_hora.getTime() + dur * 60_000);
     return novoInicio < fim && novoFim > a.data_hora;
   });
 
@@ -111,9 +142,9 @@ router.post("/", async (req, res: Response): Promise<void> => {
   const googleEventId = await criarEventoCalendar(
     tenantId,
     calendarId,
-    `${servico.nome} — ${cliente_nome}`,
+    `${nomesServicos} — ${cliente_nome}`,
     novoInicio,
-    servico.duracao_minutos,
+    duracaoTotal,
     `Cliente: ${cliente_nome} | Tel: ${cliente_telefone}`
   );
 
@@ -121,18 +152,18 @@ router.post("/", async (req, res: Response): Promise<void> => {
     data: {
       tenant_id: tenantId,
       profissional_id,
-      servico_id,
+      servico_id: servicos[0].id, // serviço primário
       cliente_nome,
       cliente_telefone,
       data_hora: novoInicio,
       status: "confirmado",
-      preco: servico.preco,
+      preco: precoTotal,
       google_event_id: googleEventId,
+      itens_servico: {
+        create: servicos.map((s, i) => ({ servico_id: s.id, preco: s.preco, ordem: i })),
+      },
     },
-    include: {
-      profissional: { select: { id: true, nome: true } },
-      servico: { select: { id: true, nome: true, duracao_minutos: true, preco: true } },
-    },
+    include: INCLUDE_SERVICOS,
   });
 
   upsertCliente(tenantId, cliente_nome, cliente_telefone, "manual").catch((e) =>
@@ -146,6 +177,7 @@ const AgendamentoEditSchema = z
   .object({
     profissional_id: z.string().min(1).optional(),
     servico_id: z.string().min(1).optional(),
+    servicos_ids: z.array(z.string().min(1)).min(1).optional(),
     cliente_nome: z.string().min(1).max(150).optional(),
     cliente_telefone: z.string().min(1).optional(),
     data_hora: z.string().datetime().optional(),
@@ -170,19 +202,35 @@ router.patch("/:id", async (req, res: Response): Promise<void> => {
   }
 
   const profissionalId = parsed.data.profissional_id ?? existente.profissional_id;
-  const servicoId = parsed.data.servico_id ?? existente.servico_id;
   const novoInicio = parsed.data.data_hora ? new Date(parsed.data.data_hora) : existente.data_hora;
 
-  const [profissional, servico, tenant] = await Promise.all([
+  // Lista de serviços efetiva: nova (se informada) ou a atual do agendamento
+  const servicosMudaram = Boolean(parsed.data.servicos_ids?.length || parsed.data.servico_id);
+  let idsServico: string[];
+  if (parsed.data.servicos_ids?.length) {
+    idsServico = parsed.data.servicos_ids;
+  } else if (parsed.data.servico_id) {
+    idsServico = [parsed.data.servico_id];
+  } else {
+    const itensAtuais = await prisma.agendamentoServico.findMany({
+      where: { agendamento_id: existente.id },
+      orderBy: { ordem: "asc" },
+    });
+    idsServico = itensAtuais.length > 0 ? itensAtuais.map((i) => i.servico_id) : [existente.servico_id];
+  }
+
+  const [profissional, servicos, tenant] = await Promise.all([
     prisma.profissional.findFirst({ where: { id: profissionalId, tenant_id: tenantId } }),
-    prisma.servico.findFirst({ where: { id: servicoId, tenant_id: tenantId } }),
+    carregarServicosOrdenados(tenantId, idsServico),
     prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
   ]);
 
   if (!profissional) { res.status(404).json({ erro: "Profissional não encontrado." }); return; }
-  if (!servico) { res.status(404).json({ erro: "Serviço não encontrado." }); return; }
+  if (servicos.length === 0) { res.status(404).json({ erro: "Serviço não encontrado." }); return; }
 
-  const novoFim = new Date(novoInicio.getTime() + servico.duracao_minutos * 60_000);
+  const duracaoTotal = servicos.reduce((sum, s) => sum + s.duracao_minutos, 0);
+  const precoTotal = servicos.reduce((sum, s) => sum + Number(s.preco), 0);
+  const novoFim = new Date(novoInicio.getTime() + duracaoTotal * 60_000);
   const inicioDia = new Date(novoInicio.toDateString());
   const fimDia = new Date(inicioDia.getTime() + 86400000);
 
@@ -194,11 +242,17 @@ router.patch("/:id", async (req, res: Response): Promise<void> => {
       id: { not: existente.id },
       data_hora: { gte: inicioDia, lt: fimDia },
     },
-    include: { servico: { select: { duracao_minutos: true } } },
+    include: {
+      servico: { select: { duracao_minutos: true } },
+      itens_servico: { include: { servico: { select: { duracao_minutos: true } } } },
+    },
   });
 
   const temConflito = agendamentosDoDia.some((a) => {
-    const fim = new Date(a.data_hora.getTime() + a.servico.duracao_minutos * 60_000);
+    const dur = a.itens_servico && a.itens_servico.length > 0
+      ? a.itens_servico.reduce((s, it) => s + it.servico.duracao_minutos, 0)
+      : a.servico.duracao_minutos;
+    const fim = new Date(a.data_hora.getTime() + dur * 60_000);
     return novoInicio < fim && novoFim > a.data_hora;
   });
 
@@ -208,22 +262,25 @@ router.patch("/:id", async (req, res: Response): Promise<void> => {
   }
 
   const calendarId = profissional.google_calendar_id ?? tenant.google_calendar_id_dono;
-  await atualizarEventoCalendar(tenantId, calendarId, existente.google_event_id, novoInicio, servico.duracao_minutos);
+  await atualizarEventoCalendar(tenantId, calendarId, existente.google_event_id, novoInicio, duracaoTotal);
 
   const atualizado = await prisma.agendamento.update({
     where: { id: existente.id },
     data: {
       profissional_id: profissionalId,
-      servico_id: servicoId,
+      servico_id: servicos[0].id,
       cliente_nome: parsed.data.cliente_nome ?? existente.cliente_nome,
       cliente_telefone: parsed.data.cliente_telefone ?? existente.cliente_telefone,
       data_hora: novoInicio,
-      ...(parsed.data.servico_id && { preco: servico.preco }),
+      ...(servicosMudaram && {
+        preco: precoTotal,
+        itens_servico: {
+          deleteMany: {},
+          create: servicos.map((s, i) => ({ servico_id: s.id, preco: s.preco, ordem: i })),
+        },
+      }),
     },
-    include: {
-      profissional: { select: { id: true, nome: true } },
-      servico: { select: { id: true, nome: true, duracao_minutos: true, preco: true } },
-    },
+    include: INCLUDE_SERVICOS,
   });
 
   res.json(atualizado);
@@ -288,8 +345,9 @@ router.get("/dashboard", async (req, res: Response): Promise<void> => {
       }),
     ]);
 
-  const somarReceita = (ags: { servico: { preco: Prisma.Decimal } }[]) =>
-    ags.reduce((soma, a) => soma + Number(a.servico.preco), 0);
+  // receita = preço total do agendamento (soma dos serviços); fallback p/ o serviço primário
+  const somarReceita = (ags: { preco: Prisma.Decimal | null; servico: { preco: Prisma.Decimal } }[]) =>
+    ags.reduce((soma, a) => soma + Number(a.preco ?? a.servico.preco), 0);
 
   const agendamentosPorDia = Array.from({ length: 14 }, (_, i) => {
     const dia = new Date(inicioHoje);
@@ -334,10 +392,7 @@ router.patch("/:id/status", async (req, res: Response): Promise<void> => {
   const atualizado = await prisma.agendamento.update({
     where: { id: existente.id },
     data: { status: parsed.data.status },
-    include: {
-      profissional: { select: { id: true, nome: true } },
-      servico: { select: { id: true, nome: true, duracao_minutos: true, preco: true } },
-    },
+    include: INCLUDE_SERVICOS,
   });
 
   if (parsed.data.status === "concluido") {
@@ -362,14 +417,15 @@ router.patch("/:id/status", async (req, res: Response): Promise<void> => {
       }
     })();
 
-    // Registrar lançamento de comissão
-    const valorBruto = Number(atualizado.servico.preco);
-    calcularERegistrarComissao(
+    // Registrar lançamento de comissão (por serviço, somando os itens)
+    const itensComissao = atualizado.itens_servico && atualizado.itens_servico.length > 0
+      ? atualizado.itens_servico.map((it) => ({ servicoId: it.servico_id, preco: Number(it.preco) }))
+      : [{ servicoId: existente.servico_id, preco: Number(atualizado.servico.preco) }];
+    calcularERegistrarComissaoMulti(
       tenantId,
       existente.id,
       existente.profissional_id,
-      existente.servico_id,
-      valorBruto
+      itensComissao
     ).catch((err) => console.error("[Comissão] Erro ao registrar lançamento:", err));
   }
 

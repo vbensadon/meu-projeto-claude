@@ -351,6 +351,7 @@ model Servico {
 
   tenant       Tenant        @relation(fields: [tenant_id], references: [id])
   agendamentos Agendamento[]
+  itens_agendamento AgendamentoServico[]
   lista_espera ListaEspera[]
   regras_comissao RegraComissao[]
 
@@ -375,10 +376,27 @@ model Agendamento {
   tenant       Tenant       @relation(fields: [tenant_id], references: [id])
   profissional Profissional @relation(fields: [profissional_id], references: [id])
   servico      Servico      @relation(fields: [servico_id], references: [id])
+  itens_servico AgendamentoServico[]
   avaliacao    Avaliacao?
   lancamento_comissao LancamentoComissao?
 
   @@map("agendamentos")
+}
+
+// Itens de serviço de um agendamento (N serviços por agendamento).
+// servico_id do Agendamento continua sendo o serviço PRIMÁRIO (primeiro escolhido),
+// mantido por retrocompatibilidade; itens_servico guarda TODOS os serviços.
+model AgendamentoServico {
+  id             String  @id @default(cuid())
+  agendamento_id String
+  servico_id     String
+  preco          Decimal @db.Decimal(10, 2)
+  ordem          Int     @default(0)
+
+  agendamento Agendamento @relation(fields: [agendamento_id], references: [id], onDelete: Cascade)
+  servico     Servico     @relation(fields: [servico_id], references: [id])
+
+  @@map("agendamento_servicos")
 }
 
 model ComissaoPagamento {
@@ -680,6 +698,7 @@ model InteractiveMessageConfig {
 enum EtapaConversa {
   BOAS_VINDAS
   ESCOLHA_SERVICO
+  SERVICO_ADICIONAR
   ESCOLHA_PROFISSIONAL
   ESCOLHA_DATA
   ESCOLHA_HORARIO

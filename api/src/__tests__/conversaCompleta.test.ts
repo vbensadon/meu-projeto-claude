@@ -15,16 +15,39 @@ import { prisma } from "../lib/prisma";
 jest.mock("../lib/prisma", () => ({
   prisma: {
     tenant: { findUnique: jest.fn(), findUniqueOrThrow: jest.fn() },
-    sessaoBot: { upsert: jest.fn(), update: jest.fn() },
+    sessaoBot: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
     servico: { findMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     profissional: { findMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     agendamento: { findMany: jest.fn(), create: jest.fn() },
+    interactiveMessageConfig: { findUnique: jest.fn() },
   },
+}));
+
+// Serviços de plataforma (instrumentação do webhook) — no-op nos testes de fluxo
+jest.mock("../platform/services/usageMetrics", () => ({
+  incrementMetric: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../platform/services/conversationService", () => ({
+  getOrCreateConversation: jest.fn().mockResolvedValue(null),
+  addMessage: jest.fn().mockResolvedValue(undefined),
+  updateConversationStep: jest.fn().mockResolvedValue(undefined),
+  completeConversation: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("../services/twilioService", () => ({
   enviarMensagem: jest.fn().mockResolvedValue(undefined),
   extrairNumero: (raw: string) => raw.replace(/^whatsapp:/, ""),
+}));
+
+// Mensagens com opções vão pelo interactiveMessenger (cliente Twilio direto).
+// Nos testes, delegamos ao enviarMensagem mockado para inspecionar o corpo.
+jest.mock("../whatsapp/interactiveMessenger", () => ({
+  sendInteractiveMessage: jest.fn(async (params: { to: string; bodyText: string; options?: { label: string; description?: string }[] }) => {
+    const { enviarMensagem } = jest.requireMock("../services/twilioService");
+    const lista = (params.options ?? []).map((o, i) => `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ""}`).join("\n");
+    await enviarMensagem({ accountSid: "ACtest", authToken: "authtoken", numeroOrigem: "whatsapp:+14155238886" }, params.to, `${params.bodyText}\n\n${lista}`);
+  }),
 }));
 
 jest.mock("../services/calendarService", () => ({
@@ -131,6 +154,7 @@ beforeEach(() => {
   });
   (mockPrisma.agendamento.create as jest.Mock).mockResolvedValue({ id: "ag-001" });
   (mockPrisma.agendamento.findMany as jest.Mock).mockResolvedValue([]);
+  (mockPrisma.interactiveMessageConfig.findUnique as jest.Mock).mockResolvedValue(null);
 });
 
 // ── Testes ─────────────────────────────────────────────────────────────────
@@ -145,9 +169,20 @@ describe("Conversa completa — fluxo feliz", () => {
     expect(resposta).toContain("R$");
   });
 
-  it("2. escolhe serviço → recebe lista de profissionais", async () => {
+  it("2. escolhe serviço → pergunta se quer adicionar outro", async () => {
     sessaoAtual = { etapa_atual: "SERVICO", dados_coletados: {} };
     await enviarMensagem("1");
+    const resposta = ultimaResposta();
+    expect(sessaoAtual.etapa_atual).toBe("SERVICO_MAIS");
+    expect(resposta).toMatch(/adicionar outro|continuar/i);
+  });
+
+  it("2b. continuar → recebe lista de profissionais", async () => {
+    sessaoAtual = {
+      etapa_atual: "SERVICO_MAIS",
+      dados_coletados: { servico_id: "s1", servico_nome: "Corte de Cabelo", servicos_ids: ["s1"], servicos_nomes: ["Corte de Cabelo"] },
+    };
+    await enviarMensagem("2"); // Continuar
     const resposta = ultimaResposta();
     expect(sessaoAtual.etapa_atual).toBe("PROFISSIONAL");
     expect(resposta).toContain("Carlos Silva");
@@ -173,16 +208,16 @@ describe("Conversa completa — fluxo feliz", () => {
     expect(resposta).toContain("09:30");
   });
 
-  it("5. escolhe horário → pede nome para confirmar", async () => {
+  it("5. escolhe horário → mostra resumo para confirmar", async () => {
     sessaoAtual = {
       etapa_atual: "HORARIO",
       dados_coletados: { servico_id: "s1", profissional_id: "p1", data: DATA_ISO, servico_nome: "Corte", profissional_nome: "Carlos" },
     };
     await enviarMensagem("2");
-    expect(sessaoAtual.etapa_atual).toBe("CONFIRMAR");
+    expect(sessaoAtual.etapa_atual).toBe("CONFIRMACAO");
     const resposta = ultimaResposta();
     expect(resposta).toContain("09:30");
-    expect(resposta).toContain("nome");
+    expect(resposta).toMatch(/confirm/i);
   });
 
   it("6. informa nome → agendamento criado e sessão resetada", async () => {

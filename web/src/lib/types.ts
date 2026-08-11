@@ -27,14 +27,25 @@ export interface Servico {
   ordem: number;
 }
 
+export interface AgendamentoServicoItem {
+  id: string;
+  servico_id: string;
+  preco: string;
+  ordem: number;
+  servico: { id: string; nome: string; duracao_minutos: number; preco: string };
+}
+
 export interface Agendamento {
   id: string;
   cliente_nome: string;
   cliente_telefone: string;
   data_hora: string;
   status: "pendente" | "confirmado" | "cancelado" | "concluido" | "nao_compareceu";
+  preco?: string | null;
   profissional: { id: string; nome: string };
+  // serviço primário (retrocompat) + lista completa de itens
   servico: { id: string; nome: string; duracao_minutos: number; preco: string };
+  itens_servico?: AgendamentoServicoItem[];
 }
 
 export interface DashboardData {

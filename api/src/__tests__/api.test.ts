@@ -16,6 +16,7 @@ jest.mock("../lib/prisma", () => ({
       findFirst: jest.fn(), delete: jest.fn(),
     },
     agendamento: { findMany: jest.fn(), count: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    agendamentoServico: { findMany: jest.fn(), deleteMany: jest.fn() },
     sessaoBot: { upsert: jest.fn(), update: jest.fn() },
   },
 }));
@@ -157,6 +158,8 @@ describe("PATCH /api/agendamentos/:id", () => {
     (mockPrisma.agendamento.findFirst as jest.Mock).mockResolvedValue(existente);
     (mockPrisma.profissional.findFirst as jest.Mock).mockResolvedValue({ id: "p1", google_calendar_id: null });
     (mockPrisma.servico.findFirst as jest.Mock).mockResolvedValue({ id: "s1", duracao_minutos: 30 });
+    (mockPrisma.servico.findMany as jest.Mock).mockResolvedValue([{ id: "s1", nome: "Corte", duracao_minutos: 30, preco: "30.00" }]);
+    (mockPrisma.agendamentoServico.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.tenant.findUniqueOrThrow as jest.Mock).mockResolvedValue({ id: "t1", google_calendar_id_dono: null });
     (mockPrisma.agendamento.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.agendamento.update as jest.Mock).mockResolvedValue({

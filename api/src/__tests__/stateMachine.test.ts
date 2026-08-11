@@ -9,6 +9,7 @@ jest.mock("../lib/prisma", () => ({
     profissional: { findMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     agendamento: { findMany: jest.fn(), create: jest.fn() },
     tenant: { findUniqueOrThrow: jest.fn() },
+    interactiveMessageConfig: { findUnique: jest.fn() },
   },
 }));
 
@@ -68,6 +69,7 @@ beforeEach(() => {
   (mockPrisma.agendamento.findMany as jest.Mock).mockResolvedValue([]);
   (mockPrisma.agendamento.create as jest.Mock).mockResolvedValue({ id: "ag-1" });
   (mockPrisma.tenant.findUniqueOrThrow as jest.Mock).mockResolvedValue(TENANT_DADOS);
+  (mockPrisma.interactiveMessageConfig.findUnique as jest.Mock).mockResolvedValue(null);
   mockHorarios.mockResolvedValue(["09:00", "09:30", "10:00", "14:00", "14:30"]);
 });
 
@@ -77,10 +79,11 @@ describe("Estado INICIO", () => {
   it("exibe lista de serviços com preço e duração", async () => {
     const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "INICIO", dados: {}, mensagemEntrada: "oi" });
     expect(r.proximaEtapa).toBe("SERVICO");
-    expect(r.resposta).toContain("Corte");
-    expect(r.resposta).toContain("Barba");
-    expect(r.resposta).toContain("R$35");
-    expect(r.resposta).toContain("30min");
+    const opcoesTxt = JSON.stringify(r.opcoes);
+    expect(opcoesTxt).toContain("Corte");
+    expect(opcoesTxt).toContain("Barba");
+    expect(opcoesTxt).toContain("R$35");
+    expect(opcoesTxt).toContain("30min");
   });
 
   it("mensagem de boas-vindas está em português", async () => {
@@ -104,16 +107,17 @@ describe("Estado INICIO", () => {
 // ── SERVICO ─────────────────────────────────────────────────────────────────
 
 describe("Estado SERVICO", () => {
-  it("seleciona serviço válido e avança para PROFISSIONAL", async () => {
+  it("seleciona serviço válido e pergunta se quer adicionar outro", async () => {
     const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO", dados: {}, mensagemEntrada: "1" });
-    expect(r.proximaEtapa).toBe("PROFISSIONAL");
+    expect(r.proximaEtapa).toBe("SERVICO_MAIS");
     expect(r.dadosAtualizados.servico_id).toBe("serv-1");
     expect(r.dadosAtualizados.servico_nome).toBe("Corte");
+    expect(r.dadosAtualizados.servicos_ids).toEqual(["serv-1"]);
   });
 
   it("seleciona último item da lista", async () => {
     const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO", dados: {}, mensagemEntrada: "3" });
-    expect(r.proximaEtapa).toBe("PROFISSIONAL");
+    expect(r.proximaEtapa).toBe("SERVICO_MAIS");
     expect(r.dadosAtualizados.servico_id).toBe("serv-3");
   });
 
@@ -131,6 +135,36 @@ describe("Estado SERVICO", () => {
   it("mantém etapa em número zero", async () => {
     const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO", dados: {}, mensagemEntrada: "0" });
     expect(r.proximaEtapa).toBe("SERVICO");
+  });
+});
+
+// ── SERVICO_MAIS (múltiplos serviços) ────────────────────────────────────────
+
+describe("Estado SERVICO_MAIS", () => {
+  const dadosUmServico = { servico_id: "serv-1", servico_nome: "Corte", servicos_ids: ["serv-1"], servicos_nomes: ["Corte"] };
+
+  it("ao 'continuar' avança para PROFISSIONAL", async () => {
+    const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO_MAIS", dados: dadosUmServico, mensagemEntrada: "2" });
+    expect(r.proximaEtapa).toBe("PROFISSIONAL");
+  });
+
+  it("ao 'adicionar outro' volta para SERVICO mantendo os já escolhidos", async () => {
+    const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO_MAIS", dados: dadosUmServico, mensagemEntrada: "1" });
+    expect(r.proximaEtapa).toBe("SERVICO");
+    expect(r.dadosAtualizados.servicos_ids).toEqual(["serv-1"]);
+    expect(r.resposta).toContain("Corte");
+  });
+
+  it("acumula um segundo serviço na lista (sem duplicar)", async () => {
+    const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO", dados: dadosUmServico, mensagemEntrada: "2" });
+    expect(r.proximaEtapa).toBe("SERVICO_MAIS");
+    expect(r.dadosAtualizados.servicos_ids).toEqual(["serv-1", "serv-2"]);
+    expect(r.dadosAtualizados.servico_id).toBe("serv-1"); // primário = primeiro
+  });
+
+  it("não duplica serviço já escolhido", async () => {
+    const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "SERVICO", dados: dadosUmServico, mensagemEntrada: "1" });
+    expect(r.dadosAtualizados.servicos_ids).toEqual(["serv-1"]);
   });
 });
 
@@ -169,10 +203,11 @@ describe("Estado DATA", () => {
     expect(r.dadosAtualizados.data).toBe(DATA_ISO);
   });
 
-  it("exibe horários disponíveis na resposta", async () => {
+  it("exibe horários disponíveis nas opções", async () => {
     const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "DATA", dados: dadosBase, mensagemEntrada: DATA_BR });
-    expect(r.resposta).toContain("09:00");
-    expect(r.resposta).toContain("14:00");
+    const opcoesTxt = JSON.stringify(r.opcoes);
+    expect(opcoesTxt).toContain("09:00");
+    expect(opcoesTxt).toContain("14:00");
   });
 
   it("rejeita formato americano MM/DD/AAAA", async () => {
@@ -258,9 +293,9 @@ describe("Estado FILA_NOME", () => {
 describe("Estado HORARIO", () => {
   const dadosBase = { servico_id: "serv-1", profissional_id: "prof-1", data: DATA_ISO };
 
-  it("seleciona horário e avança para CONFIRMAR", async () => {
+  it("seleciona horário e avança para CONFIRMACAO", async () => {
     const r = await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "HORARIO", dados: dadosBase, mensagemEntrada: "1" });
-    expect(r.proximaEtapa).toBe("CONFIRMAR");
+    expect(r.proximaEtapa).toBe("CONFIRMACAO");
     expect(r.dadosAtualizados.horario).toBe("09:00");
   });
 
@@ -330,5 +365,18 @@ describe("Estado CONFIRMAR", () => {
     const dataHora: Date = chamada.data.data_hora;
     expect(dataHora.getHours()).toBe(9);
     expect(dataHora.getMinutes()).toBe(0);
+  });
+
+  it("cria agendamento multi-serviço somando preço e gravando itens", async () => {
+    const dadosMulti = {
+      ...dadosCompletos,
+      servicos_ids: ["serv-1", "serv-2"],
+      servicos_nomes: ["Corte", "Barba"],
+    };
+    await processarMensagem({ tenantId: TENANT_ID, clienteTelefone: TELEFONE, etapa: "CONFIRMAR", dados: dadosMulti, mensagemEntrada: "Ana Souza" });
+    const chamada = (mockPrisma.agendamento.create as jest.Mock).mock.calls[0][0];
+    expect(Number(chamada.data.preco)).toBe(60); // 35 + 25
+    expect(chamada.data.servico_id).toBe("serv-1"); // primário
+    expect(chamada.data.itens_servico.create).toHaveLength(2);
   });
 });

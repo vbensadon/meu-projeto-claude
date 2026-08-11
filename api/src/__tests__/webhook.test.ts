@@ -5,10 +5,11 @@ import { prisma } from "../lib/prisma";
 jest.mock("../lib/prisma", () => ({
   prisma: {
     tenant: { findUnique: jest.fn() },
-    sessaoBot: { upsert: jest.fn(), update: jest.fn() },
+    sessaoBot: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
     servico: { findMany: jest.fn() },
     profissional: { findMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     agendamento: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+    interactiveMessageConfig: { findUnique: jest.fn() },
   },
 }));
 
@@ -24,6 +25,27 @@ jest.mock("../services/calendarService", () => ({
 
 jest.mock("../services/lembreteService", () => ({
   tratarRespostaLembrete: jest.fn().mockResolvedValue(null),
+}));
+
+// instrumentação do webhook (painel de plataforma) — no-op nos testes
+jest.mock("../platform/services/usageMetrics", () => ({
+  incrementMetric: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../platform/services/conversationService", () => ({
+  getOrCreateConversation: jest.fn().mockResolvedValue(null),
+  addMessage: jest.fn().mockResolvedValue(undefined),
+  updateConversationStep: jest.fn().mockResolvedValue(undefined),
+  completeConversation: jest.fn().mockResolvedValue(undefined),
+}));
+
+// mensagens com opções: delega ao enviarMensagem mockado para inspeção
+jest.mock("../whatsapp/interactiveMessenger", () => ({
+  sendInteractiveMessage: jest.fn(async (params: { to: string; bodyText: string; options?: { label: string; description?: string }[] }) => {
+    const { enviarMensagem } = jest.requireMock("../services/twilioService");
+    const lista = (params.options ?? []).map((o, i) => `${i + 1}. ${o.label}${o.description ? ` — ${o.description}` : ""}`).join("\n");
+    await enviarMensagem({ accountSid: "ACtest", authToken: "token", numeroOrigem: "whatsapp:+14155238886" }, params.to, `${params.bodyText}\n\n${lista}`);
+  }),
 }));
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
@@ -58,6 +80,7 @@ beforeEach(() => {
   (mockPrisma.profissional.findMany as jest.Mock).mockResolvedValue([
     { id: "p1", nome: "Carlos", ativo: true },
   ]);
+  (mockPrisma.interactiveMessageConfig.findUnique as jest.Mock).mockResolvedValue(null);
 });
 
 describe("Webhook POST /webhook/:tenantSlug", () => {
