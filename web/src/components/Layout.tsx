@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme, type Theme } from "../contexts/ThemeContext";
@@ -355,7 +355,15 @@ export default function Layout() {
 
         {/* Main */}
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="h-full flex items-center justify-center">
+                <div className="w-7 h-7 border-2 border-ab-border border-t-ab-accent rounded-full animate-spin" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
